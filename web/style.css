@@ -118,3 +118,13 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #000; color:
 #tripbar b { font-size: 17px; }
 #tripbar small { font-size: 10px; color: #8a9199; }
 #manual:not(.hidden) ~ #tripbar { bottom: calc(max(10px, env(safe-area-inset-bottom)) + 72px); }
+
+#halo { position: fixed; inset: 0; pointer-events: none; z-index: 3; opacity: 0; transition: opacity .4s; box-shadow: inset 0 0 90px 24px rgba(255,30,30,.55); }
+#halo.on { opacity: 1; }
+#radar { position: fixed; left: 50%; transform: translateX(-50%); bottom: max(14px, env(safe-area-inset-bottom)); width: 78px; height: 78px; border-radius: 50%; background: #fff; color: #111;
+  border: 7px solid #d6191e; display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 4; pointer-events: none; animation: blink 1s steps(2, jump-none) infinite; }
+#radar b { font-size: 28px; line-height: 1; }
+#radar small { font-size: 12px; font-weight: 700; margin-top: 2px; }
+#radar[hidden] { display: none; }
+@keyframes blink { 50% { opacity: .35; } }
+#manual:not(.hidden) ~ #radar { bottom: calc(max(14px, env(safe-area-inset-bottom)) + 70px); }

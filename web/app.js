@@ -3,7 +3,8 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { search, routesTo, flowTraffic, roadInfo, testRoute, testAlternative, stepLabel, ARROWS, onNote } from './nav.js';
-import { directionTexture, limitTexture } from './signs.js';
+import { directionTexture, limitTexture, stopTexture, yieldTexture, crossingTexture, radarTexture } from './signs.js';
+import { RoadData } from './roaddata.js';
 import { VoiceGuide } from './voice.js';
 
 // ------------------------------------------------------------------ constants (same road model as the Android app)
@@ -185,7 +186,7 @@ function classifyMaterial(m) {
   if (/^primary/.test(n)) bodyMats.push(m);
   if (/indicator/.test(n)) (/_l/.test(n) ? lampMats.sigL : lampMats.sigR).push(m);
   else if (/brea?k/.test(n)) lampMats.brake.push(m);
-  else if (/rear.?light/.test(n)) lampMats.tail.push(m);
+  else if (/rear.?light|tembus.?red|satin.?red/.test(n)) lampMats.tail.push(m);
   else if (/(front.{0,6}light|fog)/.test(n)) lampMats.head.push(m);
 }
 
@@ -427,8 +428,8 @@ function frame(now) {
 
     const blink = Math.floor(now / 625) % 2 === 0;
     setLamps(lampMats.head, st.headlights, 0xfff0c0, 3);
-    setLamps(lampMats.tail, st.headlights || braking, 0xff1010, 5);
-    setLamps(lampMats.brake, braking, 0xff1010, 10);
+    setLamps(lampMats.tail, st.headlights || braking, 0xff1010, 2.4);
+    setLamps(lampMats.brake, braking, 0xff1010, 6);
     setLamps(lampMats.sigL, st.hazard && blink, 0xff8c00, 4);
     setLamps(lampMats.sigR, st.hazard && blink, 0xff8c00, 4);
     for (const sp of headSpots) sp.intensity = st.headlights ? (night ? 250 : 60) : 0;
@@ -584,7 +585,7 @@ function drawRoute(sN) {
   dest.setData({ type: 'Feature', geometry: { type: 'Point', coordinates: [end[1], end[0]] } });
 }
 const baseApplyTheme = applyTheme;
-applyTheme = function () { baseApplyTheme(); if (map) { mapStyleReady = false; map.setStyle(night ? STYLE_NIGHT : STYLE_DAY); } };
+applyTheme = function () { baseApplyTheme(); if (map) { mapStyleReady = false; map.setStyle(night ? STYLE_NIGHT : STYLE_DAY, { diff: false }); } };
 setupMap();
 
 // --- places search: recents and favourites that match what you type, plus live suggestions; drag down = home
@@ -655,7 +656,8 @@ $('ttKey').value = ttKey;
 $('bSettings').onclick = () => { $('settings').hidden = false; };
 $('xSettings').onclick = () => { $('settings').hidden = true; };
 $('closeSettings').onclick = () => { ttKey = $('ttKey').value.trim(); store.set('tomtom', ttKey); $('settings').hidden = true; };
-window.d3d = { testRoute: () => { const o = origin() || { lat: 43.263, lon: -2.935 }; const r = testRoute(o.lat, o.lon); setRoute(r, null, true, [testAlternative(r)]); rt.limit = 90; say('Ruta de prueba'); }, clearRoute, voice: null };
+window.d3d = { testRoute: () => { const o = origin() || { lat: 43.263, lon: -2.935 }; const r = testRoute(o.lat, o.lon); setRoute(r, null, true, [testAlternative(r)]); rt.limit = 90; say('Ruta de prueba'); }, clearRoute, voice: null,
+  testSigns: (k = 1) => { fakeItems = true; itemsAt = { odo: st.odo, list: [{ kind: 'p', dist: 60 * k, max: 0, key: 'a' }, { kind: 's', dist: 90 * k, max: 0, key: 'b' }, { kind: 'c', dist: 130 * k, max: 0, key: 'c' }, { kind: 't', dist: 170 * k, max: 0, key: 'd' }, { kind: 'r', dist: 300 * k, max: 80, key: 'e' }] }; } };
 $('bTest').onclick = () => { $('settings').hidden = true; window.d3d.testRoute(); };
 $('bClear').onclick = () => { $('settings').hidden = true; clearRoute(); };
 
@@ -696,14 +698,90 @@ function updateSigns(d0, th0) {
     limSign.g.position.set(p.x, 0, p.z); limSign.g.rotation.y = p.yaw;
     setMap(limSign, limitTexture(rt.limit));
   }
+  updateRoadItems(d0, th0);
+}
+
+// --- stop / give way / traffic lights / crossings and speed cameras from senales.json and radares.json
+RoadData.load().then((ok) => { if (!ok) console.info('senales.json / radares.json no encontrados: sin señales ni radares'); });
+const ITEM_SLOTS = [];
+{
+  const zc = document.createElement('canvas'); zc.width = 256; zc.height = 128;
+  const zg = zc.getContext('2d'); zg.fillStyle = '#f2f2f2';
+  for (let i = 0; i < 8; i++) zg.fillRect(i * 32 + 4, 0, 18, 128);
+  const zebraTex = new THREE.CanvasTexture(zc); zebraTex.colorSpace = THREE.SRGBColorSpace;
+  const zebraMat = new THREE.MeshBasicMaterial({ map: zebraTex, transparent: true, depthWrite: false });
+  const metal = new THREE.MeshStandardMaterial({ color: 0x40464f, metalness: 0.6, roughness: 0.5 });
+  for (let i = 0; i < 10; i++) {
+    const sign = makeSign(0.9, 0.9, 2.4, 2.4);
+    const zebra = new THREE.Mesh(new THREE.PlaneGeometry(7.4, 3), zebraMat); zebra.rotation.x = -Math.PI / 2; zebra.visible = false; scene.add(zebra);
+    const lights = new THREE.Group(); lights.visible = false; scene.add(lights);
+    const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.08, 4.2, 8), metal); pole.position.y = 2.1;
+    const head = new THREE.Mesh(new THREE.BoxGeometry(0.42, 1.15, 0.3), new THREE.MeshStandardMaterial({ color: 0x15181c })); head.position.y = 4.4;
+    lights.add(pole, head);
+    const lamps = [0xff2a20, 0xffb000, 0x30e060].map((c, k) => {
+      const m = new THREE.Mesh(new THREE.SphereGeometry(0.13, 12, 8), new THREE.MeshBasicMaterial({ color: c })); m.position.set(0, 4.75 - k * 0.35, 0.18); lights.add(m); return m;
+    });
+    ITEM_SLOTS.push({ sign, zebra, lights, lamps });
+  }
+}
+const SIGN_TEX = { s: stopTexture, c: yieldTexture, p: crossingTexture };
+let itemsAt = { odo: 0, list: [] }, fakeItems = false;
+const spokenRadars = new Set();
+function pickPosition() {
+  if (rt.mapValid) return { lat: rt.mapLat, lon: rt.mapLon, brg: rt.mapBrg };
+  if (st.pos && st.pos.heading != null && !Number.isNaN(st.pos.heading)) return { lat: st.pos.lat, lon: st.pos.lon, brg: st.pos.heading };
+  return null;
+}
+setInterval(() => {
+  if (fakeItems) return;
+  const p = pickPosition();
+  itemsAt = { odo: st.odo, list: p ? RoadData.ahead(p.lat, p.lon, p.brg) : [] };
+}, 250);
+function updateRoadItems(d0, th0) {
+  const list = itemsAt.list, moved = d0 - itemsAt.odo;
+  let radar = null;
+  ITEM_SLOTS.forEach((sl, i) => {
+    const it = list[i], d = it ? it.dist - moved : -1;
+    sl.sign.g.visible = sl.zebra.visible = sl.lights.visible = false;
+    if (!it || !(d > -2 && d < 450)) return;
+    if (it.kind === 'p') {
+      const z = pose(d, -1.85, d0, th0); sl.zebra.visible = true; sl.zebra.position.set(z.x, 0.012, z.z); sl.zebra.rotation.z = -z.yaw;
+    }
+    if (it.kind === 't') {
+      const p = pose(d, 3.0, d0, th0); sl.lights.visible = true; sl.lights.position.set(p.x, 0, p.z); sl.lights.rotation.y = p.yaw;
+      const ph = ((performance.now() / 1000) + it.key.length * 3.7) % 18, c = ph < 9 ? 2 : ph < 11 ? 1 : 0;
+      sl.lamps.forEach((m, k) => { m.visible = k === c; });
+    } else if (it.kind === 'r') {
+      const p = pose(d, 3.15, d0, th0); sl.sign.g.visible = true; sl.sign.g.position.set(p.x, 0, p.z); sl.sign.g.rotation.y = p.yaw;
+      sl.sign.plate.scale.set(1.15, 1.45, 1); setMap(sl.sign, radarTexture(it.max));
+      if (d > 0 && (!radar || d < radar.d)) radar = { d, max: it.max, key: it.key };
+    } else {
+      const p = pose(d, 3.0, d0, th0); sl.sign.g.visible = true; sl.sign.g.position.set(p.x, 0, p.z); sl.sign.g.rotation.y = p.yaw;
+      sl.sign.plate.scale.set(1, 1, 1); setMap(sl.sign, SIGN_TEX[it.kind]());
+    }
+  });
+  // speed-camera sign in the HUD (bottom centre, blinking) + one spoken warning per camera
+  const rd = $('radar');
+  if (radar && radar.d < 700) {
+    rd.hidden = false; $('radMax').textContent = radar.max > 0 ? radar.max : '!';
+    $('radDist').textContent = Math.max(0, Math.round(radar.d / 10) * 10) + ' m';
+    if (radar.d < 500 && !spokenRadars.has(radar.key)) {
+      if (spokenRadars.size > 200) spokenRadars.clear();
+      spokenRadars.add(radar.key);
+      voice.say('Radar a ' + Math.max(50, Math.round(radar.d / 50) * 50) + ' metros' + (radar.max > 0 ? ', límite ' + radar.max : ''));
+    }
+  } else rd.hidden = true;
+  rt.radarMax = radar && radar.max > 0 ? radar.max : null;
+  if (radar) $('tripbar').hidden = true;
 }
 
 // --- speed limit in the HUD, and the speedometer ring turns red when over it
 let shownLimit = undefined;
 function hudFrame() {
   if (shownLimit !== rt.limit) { shownLimit = rt.limit; $('limit').hidden = rt.limit == null; $('limit').textContent = rt.limit ?? ''; }
-  const over = rt.limit != null && st.speedKmh > rt.limit + 3;
+  const over = (rt.limit != null && st.speedKmh > rt.limit + 3) || (rt.radarMax != null && st.speedKmh > rt.radarMax + 3);
   ring.style.stroke = over ? '#ff5252' : '';
+  $('halo').classList.toggle('on', over);
 }
 
 // --- traffic card (colour = level) with the alternative-route button

@@ -95,3 +95,39 @@ export function limitTexture(n) {
     text(g, String(n), r, r + 4, n >= 100 ? 92 : 110, '#111');
   });
 }
+
+/** Red octagon STOP. */
+export function stopTexture() {
+  return texture('stop', 256, 256, (g, w) => {
+    const c = w / 2, r = c - 6;
+    g.beginPath(); for (let i = 0; i < 8; i++) { const a = Math.PI / 8 + i * Math.PI / 4; g.lineTo(c + r * Math.cos(a), c + r * Math.sin(a)); } g.closePath();
+    g.fillStyle = '#d6191e'; g.fill(); g.lineWidth = 10; g.strokeStyle = '#fff'; g.stroke();
+    text(g, 'STOP', c, c + 4, 78, '#fff');
+  });
+}
+/** Give-way triangle (point down). */
+export function yieldTexture() {
+  return texture('yield', 256, 256, (g, w) => {
+    g.fillStyle = '#fff'; tri(g, 10, 30, w - 10, 30, w / 2, w - 20);
+    g.fillStyle = '#d6191e'; tri(g, 10, 30, w - 10, 30, w / 2, w - 20);
+    g.fillStyle = '#fff'; tri(g, 52, 62, w - 52, 62, w / 2, w - 78);
+  });
+}
+/** Pedestrian crossing: blue square with a walking person. */
+export function crossingTexture() {
+  return texture('cross', 256, 256, (g, w) => {
+    g.fillStyle = '#0a4fa3'; rr(g, 6, 6, w - 12, w - 12, 24); g.fill();
+    g.strokeStyle = '#fff'; g.lineWidth = 8; rr(g, 16, 16, w - 32, w - 32, 16); g.stroke();
+    text(g, '🚶', w / 2, w / 2 + 6, 130, '#fff', 'normal');
+  });
+}
+/** Speed-camera plate: limit disc with a camera icon strip. */
+export function radarTexture(n) {
+  return texture('rad|' + n, 256, 330, (g, w) => {
+    g.fillStyle = '#0a4fa3'; rr(g, 4, 4, w - 8, 322, 22); g.fill();
+    g.fillStyle = '#fff'; g.beginPath(); g.arc(w / 2, 118, 96, 0, 2 * Math.PI); g.fill();
+    g.strokeStyle = '#d6191e'; g.lineWidth = 22; g.beginPath(); g.arc(w / 2, 118, 85, 0, 2 * Math.PI); g.stroke();
+    text(g, n > 0 ? String(n) : '!', w / 2, 122, n >= 100 ? 84 : 100, '#111');
+    text(g, '📷 RADAR', w / 2, 278, 52, '#fff');
+  });
+}
