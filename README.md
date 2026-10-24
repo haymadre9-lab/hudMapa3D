@@ -48,8 +48,12 @@ Probar en local (la dirección admite `?lat=..&lon=..` para simular la posición
 npx serve web
 ```
 
-Publicar en GitHub Pages: sube el repositorio (público para el plan gratuito) y en **Settings -> Pages -> Source** elige **GitHub Actions**.
-El flujo `.github/workflows/pages.yml` publica la carpeta `web/` en cada cambio sobre `main`. La web usa HTTPS, necesario para el GPS.
+Publicar en GitHub Pages (dos formas, las dos valen):
+
+1. **Settings -> Pages -> Source: GitHub Actions.** El flujo `.github/workflows/pages.yml` publica la carpeta `web/` (necesita que la carpeta oculta `.github` esté subida).
+2. **Settings -> Pages -> Source: Deploy from a branch -> `main` / `(root)`.** El `index.html` de la raíz redirige a `web/`.
+
+Si ves el README en lugar de la app, es que Pages publica la raíz sin `index.html`: sube el `index.html` de la raíz o cambia la fuente a GitHub Actions. La web usa HTTPS, necesario para el GPS.
 
 Los datos de señales y radares **no** forman parte de la web ni deben ir en un repositorio público (ver [`CREDITS.md`](CREDITS.md)).
 

@@ -307,13 +307,9 @@ class MainActivity : ComponentActivity() {
         Box(Modifier.fillMaxSize().background(Color.Black)) {
             ViewerScene(s, Modifier.fillMaxSize())
 
-            // HUD
-            Column(Modifier.align(Alignment.TopStart).padding(14.dp)) {
-                Text("D3D CLONE", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 15.sp)
-                Text("${s.fps} fps · ${s.speedKmh.toInt()} km/h · ${if (s.night) "noche" else "día"}", color = Color(0xCCFFFFFF), fontSize = 12.sp)
-                Text(s.rigInfo, color = Color(0x99FFFFFF), fontSize = 11.sp)
-                if (s.gyro) Text("cabeceo %.1f° · alabeo %.1f°".format(s.pitchDeg, s.rollDeg), color = Color(0xFF7CE0FF), fontSize = 12.sp)
-            }
+            // HUD: no title or frame counter any more; the top-left corner is for the traffic / alternative-route card
+            if (s.gyro) Text("cabeceo %.1f° · alabeo %.1f°".format(s.pitchDeg, s.rollDeg), color = Color(0xFF7CE0FF), fontSize = 12.sp,
+                modifier = Modifier.align(Alignment.BottomStart).padding(start = 14.dp, bottom = 130.dp))
             OverspeedHalo(s)
             val landscape = androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp >= 600
             if (s.showMap) MiniMap(s, Modifier.align(Alignment.TopEnd).padding(end = 10.dp, top = 64.dp)
@@ -324,7 +320,7 @@ class MainActivity : ComponentActivity() {
             if (s.tripKm.isNotEmpty() && s.radarMax == null && s.routeVer >= 0)
                 TripBar(s, Modifier.align(Alignment.BottomCenter).padding(bottom = if (narrow) 128.dp else 14.dp))
             RadarSign(s, if (narrow) Modifier.align(Alignment.BottomEnd).padding(end = 14.dp, bottom = 40.dp) else Modifier.align(Alignment.BottomCenter).padding(bottom = 18.dp))
-            TrafficCard(s, { a -> switchToAlternative(a) }, Modifier.align(Alignment.TopStart).padding(start = 14.dp, top = 110.dp))
+            TrafficCard(s, { a -> switchToAlternative(a) }, Modifier.align(Alignment.TopStart).padding(start = 14.dp, top = if (landscape) 14.dp else 72.dp))
             // small red "stop route" pill on the top-right corner of the map
             if (s.routeVer >= 0 && Course.route != null && s.showMap) Text("✕", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold,
                 modifier = Modifier.align(Alignment.TopEnd).padding(end = 16.dp, top = 70.dp).clip(RoundedCornerShape(12.dp)).background(Color(0xE6C62828))
@@ -417,6 +413,7 @@ class MainActivity : ComponentActivity() {
                     if (s.keyNote.isNotEmpty()) Text(s.keyNote, color = Color(0xFFFFB74D), fontSize = 11.sp)
 
                     Section("Calidad")
+                    Text("${s.fps} fps · ${s.speedKmh.toInt()} km/h · ${if (s.night) "noche" else "día"} · ${s.rigInfo}", color = Color.Gray, fontSize = 11.sp)
                     Toggle("Bloom", s.bloom) { s.bloom = it }
                     Toggle("MSAA 4x", s.msaa) { s.msaa = it }
                     Toggle("Oclusión ambiental (pesado)", s.ao) { s.ao = it }
