@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
+    <!-- speed ring -->
+    <path android:pathData="M33.2,74.8 A29,29 0 1 1 74.8,74.8" android:strokeColor="#FF4FC3F7" android:strokeWidth="5"
+        android:strokeLineCap="round" android:fillColor="#00000000" />
+    <!-- road / A chevron -->
+    <path android:pathData="M54,32 L72,76 L63.5,76 L54,52 L44.5,76 L36,76 Z" android:fillColor="#FFFFFFFF" />
+    <!-- centre dash -->
+    <path android:pathData="M52,60 h4 v8 h-4 z" android:fillColor="#FF4FC3F7" />
+</vector>
