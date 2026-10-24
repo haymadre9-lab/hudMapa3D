@@ -9,13 +9,29 @@
 <title>D3D Clone</title>
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icon.svg" type="image/svg+xml">
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/maplibre-gl@4.7.1/dist/maplibre-gl.css">
+<link rel="stylesheet" href="vendor/maplibre/maplibre-gl.css">
 <link rel="stylesheet" href="style.css">
-<script src="https://cdn.jsdelivr.net/npm/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+<script>
+(function () {
+  // Show any start-up problem on the loading screen instead of staying silent.
+  var say = function (t) { var m = document.getElementById('loadmsg'); if (m) m.textContent = t; var s = document.querySelector('.spin'); if (s) s.style.display = 'none'; };
+  window.addEventListener('error', function (e) {
+    if (e.target && e.target.tagName) say('No se pudo cargar ' + (e.target.src || e.target.href || e.target.tagName) + ' (¿sin internet o bloqueado?)');
+    else say('Error: ' + (e.message || 'desconocido') + (e.filename ? ' (' + e.filename.split('/').pop() + ':' + e.lineno + ')' : ''));
+  }, true);
+  window.addEventListener('unhandledrejection', function (e) { say('Error: ' + ((e.reason && e.reason.message) || e.reason)); });
+  window.addEventListener('DOMContentLoaded', function () {
+    if (!(window.HTMLScriptElement && HTMLScriptElement.supports && HTMLScriptElement.supports('importmap'))) say('Tu navegador es demasiado antiguo para esta web. Actualiza Chrome, Firefox o Safari (16.4 o superior).');
+    else if (!document.createElement('canvas').getContext('webgl2')) say('Tu navegador no ofrece WebGL2, necesario para el 3D. Prueba con Chrome.');
+    setTimeout(function () { var l = document.getElementById('loading'); if (l && !/done/.test(l.className)) { var m = document.getElementById('loadmsg'); if (m && /Cargando/.test(m.textContent)) m.textContent += ' (tarda más de lo normal…)'; } }, 25000);
+  });
+})();
+</script>
+<script src="vendor/maplibre/maplibre-gl.js"></script>
 <script type="importmap">
 { "imports": {
-  "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
-  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+  "three": "./vendor/three/build/three.module.js",
+  "three/addons/": "./vendor/three/examples/jsm/"
 } }
 </script>
 </head>
@@ -46,25 +62,13 @@
 
 <nav id="tools">
   <button id="bSearch" title="Buscar destino">🔍</button>
-  <button id="bCancel" title="Parar la ruta" hidden>🚫</button>
-  <button id="bVoice" title="Avisos por voz" class="on">🔊</button>
-  <button id="bNight" title="Día / noche">🌙</button>
-  <button id="bLights" title="Faros">💡</button>
-  <button id="bDoors" title="Abrir / cerrar puertas">🚪</button>
-  <button id="bRoad" title="Tipo de vía: automático">🛣️</button>
-  <button id="bHazard" title="Emergencia">⚠️</button>
-  <button id="bGps" title="Velocidad por GPS">📡</button>
-  <button id="bCam" title="Cámara de seguimiento">🎥</button>
   <button id="bSettings" title="Ajustes">⚙️</button>
-  <button id="bInfo" title="Créditos">ⓘ</button>
 </nav>
 
 <div id="manual">
   <label>Velocidad <output id="manualOut">0</output> km/h</label>
   <input id="manualSlider" type="range" min="0" max="200" value="0">
 </div>
-
-<div id="colors"></div>
 
 <div id="minimap"><div id="carmark"></div></div>
 
@@ -86,9 +90,23 @@
 <div id="settings" hidden>
   <div class="card">
     <h2>Ajustes</h2>
+    <div id="colors"></div>
+    <div id="quick">
+    <button id="bCancel" title="Parar la ruta" hidden>🚫</button>
+    <button id="bVoice" title="Avisos por voz" class="on">🔊</button>
+    <button id="bNight" title="Día / noche">🌙</button>
+    <button id="bLights" title="Faros">💡</button>
+    <button id="bDoors" title="Abrir / cerrar puertas">🚪</button>
+    <button id="bRoad" title="Tipo de vía: automático">🛣️</button>
+    <button id="bHazard" title="Emergencia">⚠️</button>
+    <button id="bGps" title="Velocidad por GPS">📡</button>
+    <button id="bCam" title="Cámara de seguimiento">🎥</button>
+    <button id="bInfo" title="Créditos">ⓘ</button>
+    </div>
     <label>Clave de TomTom (opcional)<input id="ttKey" type="password" placeholder="Se guarda solo en este navegador" autocomplete="off"></label>
     <p class="small">Se usa para buscar y trazar rutas con TomTom si tu clave tiene activados Search y Routing. Sin clave se usan servicios libres (Photon y OSRM). Nunca se sube a ningún sitio.</p>
     <p class="small warn" id="keyNote"></p>
+    <p class="small" id="diag"></p>
     <button id="bTest">Ruta de prueba</button> <button id="bClear">Quitar ruta</button>
     <button id="closeSettings">Guardar y cerrar</button>
   </div>

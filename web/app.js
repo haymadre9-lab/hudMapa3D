@@ -261,7 +261,7 @@ loader.load('assets/tesla_model3.glb', (gltf) => {
   }
   carReady = true;
   $('loading').classList.add('done');
-}, (e) => { if (e.total) $('loadmsg').textContent = 'Cargando el coche… ' + Math.round(100 * e.loaded / e.total) + '%'; },
+}, (e) => { if (e.total) $('loadmsg').textContent = 'Cargando el coche… ' + Math.min(100, Math.round(100 * e.loaded / e.total)) + '%'; },
 (err) => { $('loadmsg').textContent = 'No se pudo cargar el coche: ' + (err.message || err); });
 
 // paint chips
@@ -290,6 +290,7 @@ function setLamps(mats, on, color, intensity) {
   for (const m of mats) {
     m.emissive.setHex(color);
     m.emissiveIntensity = on ? intensity : 0;
+    if (color === 0xff1010 && m.emissiveMap) { m.emissiveMap = null; m.needsUpdate = true; } // the baked emissive texture is nearly black: use a flat red glow instead
   }
 }
 
@@ -426,8 +427,8 @@ function frame(now) {
 
     const blink = Math.floor(now / 625) % 2 === 0;
     setLamps(lampMats.head, st.headlights, 0xfff0c0, 3);
-    setLamps(lampMats.tail, st.headlights || braking, 0xff1c10, 1.6);
-    setLamps(lampMats.brake, braking, 0xff1c10, 3.5);
+    setLamps(lampMats.tail, st.headlights || braking, 0xff1010, 5);
+    setLamps(lampMats.brake, braking, 0xff1010, 10);
     setLamps(lampMats.sigL, st.hazard && blink, 0xff8c00, 4);
     setLamps(lampMats.sigR, st.hazard && blink, 0xff8c00, 4);
     for (const sp of headSpots) sp.intensity = st.headlights ? (night ? 250 : 60) : 0;
@@ -799,6 +800,7 @@ function updateBuildings(d0, th0) {
   }
 }
 
+setInterval(() => { $('diag').textContent = $('gpsstate').textContent + ' · ' + $('fps').textContent; }, 1000);
 if (q.get('test')) window.d3d.testRoute();
 
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
