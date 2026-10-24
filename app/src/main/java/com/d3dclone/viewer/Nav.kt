@@ -32,6 +32,8 @@ class Route(val lat: DoubleArray, val lon: DoubleArray, val steps: List<Step>, v
     @Volatile var traffic: List<DoubleArray> = traffic
     /** True when the traffic comes from TomTom's flow API (route calculated by a free service). */
     @Volatile var viaFlow = false
+    /** Estimated travel time of the whole route in seconds (TomTom with traffic, or the free router's duration). */
+    var etaSec: Int = travelSec
     val n = lat.size
     private val mx = 111320.0 * cos(Math.toRadians(lat[0])); private val my = 110540.0
     val x = DoubleArray(n) { (lon[it] - lon[0]) * mx }
@@ -313,7 +315,7 @@ object Router {
             if (mw) { val last = motorway.lastOrNull(); if (last != null && abs(last[1] - acc) < 1.0) last[1] = acc + dist else motorway.add(doubleArrayOf(acc, acc + dist)) }
             acc += dist
         }
-        return if (la.size >= 2) Route(la, lo, steps, to.name, motorway) else null
+        return if (la.size >= 2) Route(la, lo, steps, to.name, motorway).also { it.etaSec = r.optDouble("duration", 0.0).toInt() } else null
     }
 
     /** A made-up route (no network) with bends, turns and a motorway exit: for testing the scene and map. */

@@ -21,6 +21,11 @@ Cambios hechos por este proyecto: escalado y recentrado de los modelos; el coche
 | `scene/structures/tesla_super_charger.glb` | Tesla Super Charger (low-poly) | Suyog modak | https://sketchfab.com/3d-models/tesla-super-charger-low-poly-b9fc975778f542babbb2e861d32b1acd |
 | `scene/trees/*.glb` | Pino, álamo, árbol redondo | Generados por código para este proyecto | — |
 
+## Versión web
+El modelo `web/assets/tesla_model3.glb` es el Tesla 2018 Model 3 de Ameer Studio (CC BY 4.0) comprimido con meshopt y texturas WebP de 1024 px (herramienta gltf-transform); la web muestra el crédito en el botón ⓘ.
+
+Los edificios de `web/assets/` (Edificio 3, Edificio 5, Edificio Brick y Edificio Corficolombiana) son los mismos modelos de la tabla de arriba, comprimidos con meshopt y texturas WebP.
+
 ## Marcas
 Tesla, Model 3, Cybertruck y Semi son marcas de Tesla, Inc. Este proyecto no está afiliado a Tesla ni a ninguna marca de automoción;
 los modelos se usan solo como contenido de demostración.

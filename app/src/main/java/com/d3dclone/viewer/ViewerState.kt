@@ -50,6 +50,9 @@ class ViewerState {
     var dest by mutableStateOf("")
     var destPlace: Router.Place? = null
     var rerouting by mutableStateOf(false)
+    var tripKm by mutableStateOf("")
+    var tripEta by mutableStateOf("")
+    var tripMin by mutableStateOf("")
     var trafficVer by mutableIntStateOf(0)
     var keyNote by mutableStateOf("")
     var voice by mutableStateOf(true)

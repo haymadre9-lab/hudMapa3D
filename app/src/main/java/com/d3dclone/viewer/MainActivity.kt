@@ -227,7 +227,12 @@ class MainActivity : ComponentActivity() {
         state.routeStatus = "Ruta de prueba · " + String.format("%.1f", r.total / 1000.0) + " km"
     }
 
-    private fun clearRoute() { state.alts = emptyList(); state.destPlace = null; Course.set(null); state.routeVer++; state.routeStatus = "" }
+    /** Stop the selected route and go back to free driving: procedural road, no manoeuvres, no traffic card. */
+    private fun clearRoute() {
+        state.alts = emptyList(); state.destPlace = null; state.rerouting = false
+        Course.set(null); state.routeVer++; state.trafficVer++
+        state.routeStatus = "Ruta cancelada"
+    }
 
     override fun onResume() {
         super.onResume()
@@ -255,6 +260,7 @@ class MainActivity : ComponentActivity() {
         if (intent.hasExtra("lat")) { state.demoLat = intent.getDoubleExtra("lat", 0.0); state.demoLon = intent.getDoubleExtra("lon", 0.0) }
         if (intent.getBooleanExtra("nomap", false)) state.showMap = false
         if (intent.hasExtra("s0")) Course.startS = intent.getDoubleExtra("s0", 0.0)
+        if (intent.getBooleanExtra("night", false)) state.night = true
         if (intent.getBooleanExtra("highway", false)) { state.highway = true; state.autoRoad = false }
         if (intent.getBooleanExtra("demo", false)) { state.demo = true; state.speedKmh = intent.getFloatExtra("speed", 50f); state.autoRotate = false
             if (intent.hasExtra("yaw")) state.camInit = floatArrayOf(intent.getFloatExtra("yaw", 0f), intent.getFloatExtra("pitch", 11f), intent.getFloatExtra("dist", 7f)) }
@@ -314,8 +320,15 @@ class MainActivity : ComponentActivity() {
                 .size(width = if (landscape) 230.dp else 150.dp, height = if (landscape) 270.dp else 330.dp))
             Speedometer(s, Modifier.align(Alignment.BottomStart).padding(start = 14.dp, bottom = 14.dp))
             val narrow = androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp < 600
+            // Trip bar (km left, arrival time, time left): hidden while a speed-camera sign takes its place
+            if (s.tripKm.isNotEmpty() && s.radarMax == null && s.routeVer >= 0)
+                TripBar(s, Modifier.align(Alignment.BottomCenter).padding(bottom = if (narrow) 128.dp else 14.dp))
             RadarSign(s, if (narrow) Modifier.align(Alignment.BottomEnd).padding(end = 14.dp, bottom = 40.dp) else Modifier.align(Alignment.BottomCenter).padding(bottom = 18.dp))
             TrafficCard(s, { a -> switchToAlternative(a) }, Modifier.align(Alignment.TopStart).padding(start = 14.dp, top = 110.dp))
+            // small red "stop route" pill on the top-right corner of the map
+            if (s.routeVer >= 0 && Course.route != null && s.showMap) Text("✕", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold,
+                modifier = Modifier.align(Alignment.TopEnd).padding(end = 16.dp, top = 70.dp).clip(RoundedCornerShape(12.dp)).background(Color(0xE6C62828))
+                    .clickable { clearRoute() }.padding(horizontal = 12.dp, vertical = 3.dp))
             ManeuverCard(s, Modifier.align(Alignment.TopCenter).padding(top = 8.dp).widthIn(max = if (landscape) 340.dp else 185.dp))
             if (s.tires) TirePressureCard(s, Modifier.align(Alignment.BottomStart).padding(start = 14.dp, bottom = 180.dp))
 
@@ -626,3 +639,21 @@ private fun Modifier.androidx_pointer_drag(onDrag: (Float) -> Unit, onEnd: () ->
     }
 
 private fun Modifier.androidx_focus(r: androidx.compose.ui.focus.FocusRequester): Modifier = this.focusRequester(r)
+
+@Composable
+private fun TripBar(s: ViewerState, modifier: Modifier) {
+    Row(modifier.clip(RoundedCornerShape(16.dp)).background(Color(0xCC101214)).padding(horizontal = 18.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(20.dp)) {
+        TripItem(s.tripKm, "restan")
+        TripItem(s.tripEta, "llegada")
+        TripItem(s.tripMin, "tiempo")
+    }
+}
+
+@Composable
+private fun TripItem(value: String, label: String) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(value, color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Bold)
+        Text(label, color = Color(0xFF8A9199), fontSize = 10.sp)
+    }
+}

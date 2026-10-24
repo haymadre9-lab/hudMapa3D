@@ -125,7 +125,7 @@ fun ViewerScene(s: ViewerState, modifier: Modifier = Modifier) {
 
     // --- Traffic: real models from assets/traffic (+ the Model 3). Lane layout depends on road type. ----
     class Traffic(val pivot: Node, var lat: Float, var d: Float, var vt: Float, val len: Float, val fix: Float,
-                  var oncoming: Boolean, var active: Boolean)
+                  var oncoming: Boolean, var active: Boolean, val rig: CarRig? = null, val beam: LightNode? = null)
     val traffic = remember(engine) { ArrayList<Traffic>() }
     val scenery = remember(engine) { Scenery(engine, modelLoader, ctx.assets) }
     val dyn = remember { floatArrayOf(0f, 0f, 0f, 0f) }       // prevSpeed, decel (km/h/s), park blend, brake hold
@@ -192,6 +192,10 @@ fun ViewerScene(s: ViewerState, modifier: Modifier = Modifier) {
     val sigFR = remember(engine) { LightNode(engine, LightManager.Type.POINT) { color(1f, 0.55f, 0.05f); intensity(0f); falloff(3f) } }
     val sigRL = remember(engine) { LightNode(engine, LightManager.Type.POINT) { color(1f, 0.55f, 0.05f); intensity(0f); falloff(3f) } }
     val sigRR = remember(engine) { LightNode(engine, LightManager.Type.POINT) { color(1f, 0.55f, 0.05f); intensity(0f); falloff(3f) } }
+    val lampLights = remember(engine) {
+        List(6) { LightNode(engine, LightManager.Type.FOCUSED_SPOT) {
+            color(1f, 0.86f, 0.58f); intensity(0f); direction(0f, -1f, 0f); falloff(20f); spotLightCone(0.7f, 1.25f) } }
+    }
     val lights = listOf(headL, headR, tailL, tailR, sigFL, sigFR, sigRL, sigRR)
 
     LaunchedEffect(Unit) {
@@ -220,11 +224,15 @@ fun ViewerScene(s: ViewerState, modifier: Modifier = Modifier) {
             val inst = pools[path]?.removeFirstOrNull() ?: continue
             val pivot = fitModel(engine, inst, len, true).first
             pivot.isVisible = false
-            traffic.add(Traffic(pivot, 0f, 40f, 0f, len, fix, false, false))
-            nodes.add(pivot)
+            val rig = (pivot.childNodes.firstOrNull() as? ModelNode)?.let { runCatching { CarRig(engine, it, null) }.getOrNull() }
+            val beam = LightNode(engine, LightManager.Type.FOCUSED_SPOT) {
+                color(1f, 0.95f, 0.8f); intensity(0f); direction(0f, -0.1f, -1f); falloff(30f); spotLightCone(0.2f, 0.55f) }
+            traffic.add(Traffic(pivot, 0f, 40f, 0f, len, fix, false, false, rig, beam))
+            nodes.add(pivot); nodes.add(beam)
         }
         for (d in drops) nodes.add(d.node)
         nodes.addAll(lights)
+        nodes.addAll(lampLights)
         for (d in drops) d.node.isVisible = false
     }
 
@@ -353,6 +361,13 @@ fun ViewerScene(s: ViewerState, modifier: Modifier = Modifier) {
             val sN = Course.sNow(odo[0])
             if (rt != null) {
                 s.routeS = sN
+                val remM = (rt.total - sN).coerceAtLeast(0.0)
+                val remSec = if (rt.etaSec > 0) rt.etaSec * remM / rt.total else remM / (if (s.highway) 25.0 else 12.0)
+                val mins = Math.round(remSec / 60.0).toInt()
+                val cal = java.util.Calendar.getInstance().apply { add(java.util.Calendar.SECOND, remSec.toInt()) }
+                s.tripKm = if (remM >= 10_000) String.format("%.0f km", remM / 1000) else String.format("%.1f km", remM / 1000)
+                s.tripMin = if (mins >= 60) "${mins / 60} h " + String.format("%02d", mins % 60) + " min" else "$mins min"
+                s.tripEta = String.format("%02d:%02d", cal.get(java.util.Calendar.HOUR_OF_DAY), cal.get(java.util.Calendar.MINUTE))
                 val pm = rt.pose(sN)
                 s.mapLat = pm[0]; s.mapLon = pm[1]; s.mapBrg = pm[2].toFloat(); s.mapValid = true
                 val tf = rt.nextTraffic(sN)
@@ -364,7 +379,7 @@ fun ViewerScene(s: ViewerState, modifier: Modifier = Modifier) {
                 if (nx != null) { s.navArrow = nx.first.arrow; s.navText = nx.first.label(s.highway); s.navDist = Math.round(nx.second / 10.0).toInt() * 10 }
                 else { s.navArrow = ""; s.navText = ""; s.navDist = 0 }
             } else {
-                s.trafficLevel = 0
+                s.trafficLevel = 0; s.tripKm = ""
                 s.navArrow = ""; s.navText = ""
                 if (s.hasFix) { s.mapLat = s.lat; s.mapLon = s.lon; s.mapBrg = s.bearing; s.mapValid = true } else s.mapValid = false
             }
@@ -393,11 +408,12 @@ fun ViewerScene(s: ViewerState, modifier: Modifier = Modifier) {
             cameraNode.position = camPos
             cameraNode.rotation = Rotation(x = -cam[1], y = cam[0], z = 0f)
 
-            // Day / night light
-            lm.setIntensity(lm.getInstance(mainLight.entity), (if (s.night) 1_500f else 90_000f) * s.brightness)
+            // Day / night light (the camera is more sensitive at night so the headlights and lamps read as light)
+            cameraNode.camera.setExposure(16f, 1f / 125f, if (s.night) 400f else 100f)
+            lm.setIntensity(lm.getInstance(mainLight.entity), (if (s.night) 6_000f else 90_000f) * s.brightness)
             lm.setColor(lm.getInstance(mainLight.entity), if (s.night) 0.55f else 1f, if (s.night) 0.65f else 0.97f, if (s.night) 1f else 0.9f)
             val envScale = (if (s.reflections) 1f else 0.25f) * s.brightness
-            (if (s.night) nightEnv else dayEnv).indirectLight?.intensity = (if (s.night) 9_000f else 38_000f) * envScale
+            (if (s.night) nightEnv else dayEnv).indirectLight?.intensity = (if (s.night) 14_000f else 38_000f) * envScale
 
             // Road: segments that bend with the (procedural) curvature and stream past the car
             val hw = s.highway
@@ -454,6 +470,11 @@ fun ViewerScene(s: ViewerState, modifier: Modifier = Modifier) {
                 o[2] = -phi * 180f / PI.toFloat()
             }
             scenery.update(d0, s.road && s.scenery, hw, pose)
+            val nearest = scenery.heads.sortedBy { Math.abs(it[3] - 6f) }
+            for ((i, l) in lampLights.withIndex()) {
+                val h = nearest.getOrNull(i)
+                if (h != null && s.night) { l.position = Position(h[0], h[1], h[2]); setLight(l, 1_200_000f) } else setLight(l, 0f)
+            }
 
             // Traffic: laid out per road type. City: oncoming in the left lane. Motorway: same-direction
             // fast lane on our side + oncoming on the other carriageway.
@@ -481,6 +502,15 @@ fun ViewerScene(s: ViewerState, modifier: Modifier = Modifier) {
                 pose(t.d, t.lat, po)
                 t.pivot.position = Position(po[0], 0f, po[1])
                 t.pivot.rotation = Rotation(0f, po[2] + (if (t.oncoming) 180f else 0f) + t.fix, 0f)
+                // night: lit lamps on the model plus a beam in the direction of travel
+                t.rig?.lamps(s.night, s.night, false, false, false)
+                t.beam?.let { b ->
+                    val psi = Math.toRadians((po[2] + (if (t.oncoming) 180f else 0f)).toDouble())
+                    val fx = (-Math.sin(psi)).toFloat(); val fz = (-Math.cos(psi)).toFloat()
+                    b.position = Position(po[0] + fx * t.len / 2f, 0.75f, po[1] + fz * t.len / 2f)
+                    lm.setDirection(lm.getInstance(b.entity), fx, -0.1f, fz)
+                    setLight(b, if (s.night && t.d in -10f..75f) 600_000f else 0f)
+                }
             }
 
             // Road info (OpenStreetMap / TomTom) and what the road ahead holds (stop, yield, lights, crossings, radars)
@@ -633,16 +663,17 @@ fun ViewerScene(s: ViewerState, modifier: Modifier = Modifier) {
             }
             val blink = (now * 1.6f).toInt() % 2 == 0
             val night = if (s.night) 1f else 0.4f
-            setLight(headL, if (s.headlights) 60_000f * night else 0f)
-            setLight(headR, if (s.headlights) 60_000f * night else 0f)
-            val tail = (if (brakeOn) 6_000f else 0f) + (if (s.headlights) 1_200f else 0f)
+            val headOn = s.headlights || s.night
+            setLight(headL, if (headOn) 600_000f * night else 0f)
+            setLight(headR, if (headOn) 600_000f * night else 0f)
+            val tail = (if (brakeOn) 6_000f else 0f) + (if (headOn) 1_200f else 0f)
             setLight(tailL, tail); setLight(tailR, tail)
             val left = (s.leftSignal || s.hazard) && blink
             val right = (s.rightSignal || s.hazard) && blink
             val sig = 9_000f * night
             setLight(sigFL, if (left) sig else 0f); setLight(sigRL, if (left) sig else 0f)
             setLight(sigFR, if (right) sig else 0f); setLight(sigRR, if (right) sig else 0f)
-            carRig.value?.lamps(s.headlights, s.headlights || brakeOn, brakeOn, left, right)
+            carRig.value?.lamps(headOn, headOn || brakeOn, brakeOn, left, right)
         },
     )
 

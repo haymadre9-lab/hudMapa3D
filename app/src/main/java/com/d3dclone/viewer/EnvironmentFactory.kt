@@ -176,7 +176,7 @@ object EnvironmentFactory {
         val light = IndirectLight.Builder()
             .reflections(refl)
             .irradiance(irr)
-            .intensity(if (night) 9_000f else 38_000f)
+            .intensity(if (night) 20_000f else 38_000f)
             .build(engine)
         val sky = Skybox.Builder().environment(refl).showSun(false).build(engine)
         return Env(refl, irr, light, sky)

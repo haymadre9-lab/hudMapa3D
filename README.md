@@ -22,6 +22,37 @@ No está afiliada a ella.
 - **Voz:** maniobras, radares y tráfico con la voz del sistema (no anuncia stop, ceda ni semáforos).
 - **Cambio automático** carretera ↔ autopista según la ruta y el GPS.
 
+## Versión web (GitHub Pages)
+
+En `web/` hay una versión web instalable (PWA) hecha con [three.js](https://threejs.org) y [MapLibre GL JS](https://maplibre.org), sin pasos de compilación.
+
+**Fase 1:** escena 3D con el Tesla Model 3 (comprimido: 22 MB -> 2,2 MB), carretera con curvas, farolas y árboles, día/noche, faros, emergencia,
+frenado detectado por la velocidad, pintura, **velocidad por GPS** del navegador (o control manual), pantalla encendida y uso sin conexión.
+
+**Fase 2:** minimapa traslúcido (OpenFreeMap), buscador con lupa (recientes, favoritos, casa arrastrando hacia abajo, autocompletado con Photon o TomTom),
+rutas con OSRM o TomTom, **la carretera 3D gira como la ruta**, cartel de maniobra (azul en autopista, blanco en carretera),
+recálculo al salirte, y botón para **parar la ruta** y volver a conducir libre. La clave de TomTom se guarda solo en el navegador (⚙️).
+
+**Fase 3:** carteles de dirección en la carretera (flecha en codo, rotonda con salidas, salida de autopista con número; blancos en carretera y azules en autopista),
+límite de velocidad de la vía (OpenStreetMap) en el HUD y en carteles, anillo del velocímetro en rojo si lo superas,
+**tráfico** en el mapa, en el asfalto 3D y en un aviso con ruta alternativa (TomTom, con tu clave: rutas con tráfico y alternativas, o flujo de tráfico si la ruta viene del servicio libre),
+y **avisos por voz** (maniobras y tráfico) con la síntesis de voz del navegador.
+
+**Fase 4:** autopista 2+2 con barrera central (automática por la ruta y el GPS, o a mano con 🛣️), edificios (modelos CC BY comprimidos) y puertas del coche que se abren (🚪).
+
+Falta por portar: radares y señales de stop/ceda/semáforos (sus datos no se publican) y el tráfico de otros coches.
+
+Probar en local (la dirección admite `?lat=..&lon=..` para simular la posición y `?test=1` para la ruta de prueba):
+
+```bash
+npx serve web
+```
+
+Publicar en GitHub Pages: sube el repositorio (público para el plan gratuito) y en **Settings -> Pages -> Source** elige **GitHub Actions**.
+El flujo `.github/workflows/pages.yml` publica la carpeta `web/` en cada cambio sobre `main`. La web usa HTTPS, necesario para el GPS.
+
+Los datos de señales y radares **no** forman parte de la web ni deben ir en un repositorio público (ver [`CREDITS.md`](CREDITS.md)).
+
 ## Compilar
 
 Requisitos: Android Studio (o JDK 17+ y Android SDK con plataforma 35). `minSdk 24`, necesita OpenGL ES 3.0.

@@ -72,6 +72,8 @@ class Scenery(private val engine: Engine, private val loader: ModelLoader, priva
     private val slots = HashMap<Cat, List<Slot>>()
     private val counts = HashMap<Cat, Int>()
     val total get() = slots.values.sumOf { it.size }
+    /** Lamp heads currently on screen: (x, y, z, distance ahead). Used to cast real light at night. */
+    val heads = ArrayList<FloatArray>()
 
     private fun files(dir: String): List<String> =
         (assets.list(dir) ?: emptyArray()).filter { it.endsWith(".glb") }.sorted()
@@ -119,7 +121,8 @@ class Scenery(private val engine: Engine, private val loader: ModelLoader, priva
 
     /** [pose] fills (x, z, yawDeg) of the road at distance d ahead and lateral offset lat from the car lane. */
     fun update(d0: Double, enabled: Boolean, highway: Boolean, pose: (Float, Float, FloatArray) -> Unit) {
-        val out = FloatArray(3)
+        val out = FloatArray(3); val head = FloatArray(3)
+        heads.clear()
         for ((cat, list) in slots) {
             val n = counts[cat] ?: continue
             val perSide = if (cat.both) 2 else 1
@@ -137,6 +140,7 @@ class Scenery(private val engine: Engine, private val loader: ModelLoader, priva
                 val leftEdge = if (highway) -18.45f else -5.55f
                 val lat = if (slot.side > 0) 1.85f + off else leftEdge - off
                 pose(d, lat, out)
+                if (cat.dir == "scene/lamps") { pose(d, lat - slot.side * slot.radius * 0.9f, head); heads.add(floatArrayOf(head[0], 7.0f, head[1], d)) }
                 val yaw = out[2] + (if (cat.faceRoad) slot.side * 90f else hashf(k, 9) * 360f) + cat.yawFix
                 slot.pivot.position = Position(out[0], 0f, out[1])
                 slot.pivot.rotation = io.github.sceneview.math.Rotation(0f, yaw, 0f)
