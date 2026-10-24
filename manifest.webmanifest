@@ -1,0 +1,16 @@
+{
+  "name": "D3D Clone",
+  "short_name": "D3D Clone",
+  "description": "Visor 3D de conducción: carretera, coche y velocidad por GPS",
+  "start_url": "./",
+  "scope": "./",
+  "display": "fullscreen",
+  "orientation": "any",
+  "background_color": "#0a1530",
+  "theme_color": "#0a1530",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" },
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}

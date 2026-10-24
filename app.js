@@ -1,0 +1,804 @@
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { search, routesTo, flowTraffic, roadInfo, testRoute, testAlternative, stepLabel, ARROWS, onNote } from './nav.js';
+import { directionTexture, limitTexture } from './signs.js';
+import { VoiceGuide } from './voice.js';
+
+// ------------------------------------------------------------------ constants (same road model as the Android app)
+const CAR_LEN = 4.4;
+const SEGS = 46, SEG = 2, BACK = 12, GRID_STEP = 0.5;
+const GRID = Math.floor((BACK + SEGS * SEG) / GRID_STEP) + 2;
+const LANE_W = 3.7;
+const $ = (id) => document.getElementById(id);
+
+// Procedural bends: heading (rad, + = turning right) as a function of metres driven.
+const theta = (d) => -0.012 * 90 * Math.cos(d / 90) - 0.008 * 37 * Math.cos(d / 37 + 1);
+let course = null, s0 = 0, odo0 = 0;
+const thetaFn = (d) => (course ? course.theta(s0 + (d - odo0)) : theta(d));
+const kappa = (d) => (thetaFn(d + 6) - thetaFn(d - 6)) / 12;
+const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+const hash = (i, k) => { let h = (i * 73856093) ^ (k * 19349663); h = Math.imul(h ^ (h >>> 13), 1274126177); return ((h ^ (h >>> 16)) & 0xffff) / 65535; };
+
+// ------------------------------------------------------------------ renderer / scene
+const canvas = $('gl');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.shadowMap.enabled = false;
+
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 400);
+const pmrem = new THREE.PMREMGenerator(renderer);
+scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+
+const sun = new THREE.DirectionalLight(0xfff4e0, 2.4);
+sun.position.set(-30, 50, 20);
+scene.add(sun);
+const hemi = new THREE.HemisphereLight(0xcfe3ff, 0x2d4a2a, 0.6);
+scene.add(hemi);
+
+const DAY = { bg: 0xcfe0f2, fog: 0xcfe0f2, sun: 2.4, hemi: 0.6, env: 1.0, asphalt: 0x30343b, grass: 0x2d6b34 };
+const NIGHT = { bg: 0x070b18, fog: 0x070b18, sun: 0.25, hemi: 0.18, env: 0.12, asphalt: 0x15171c, grass: 0x0f2415 };
+let night = false;
+
+const asphalt = new THREE.MeshStandardMaterial({ color: DAY.asphalt, roughness: 0.9 });
+const TINTS = [0x625712, 0x6e3c0f, 0x701818];            // asphalt with some traffic / dense / jam
+const roadMats = [asphalt, ...TINTS.map((c) => new THREE.MeshStandardMaterial({ color: c, roughness: 0.9 }))];
+const paint = new THREE.MeshStandardMaterial({ color: 0xe8e8e8, roughness: 0.6 });
+const grassMat = new THREE.MeshStandardMaterial({ color: DAY.grass, roughness: 1 });
+const ground = new THREE.Mesh(new THREE.PlaneGeometry(600, 600), grassMat);
+ground.rotation.x = -Math.PI / 2; ground.position.y = -0.03;
+scene.add(ground);
+
+// ------------------------------------------------------------------ road
+const gx = new Float32Array(GRID), gz = new Float32Array(GRID);
+const CB = -14.75;                       // centre of the second carriageway on a motorway
+let hwMode = false, roadMode = 'auto';    // roadMode: auto (route / GPS), city, hw
+const barrierMat = new THREE.MeshStandardMaterial({ color: 0x9aa1aa, metalness: 0.5, roughness: 0.5 });
+const roadSegs = [];
+for (let i = 0; i < SEGS; i++) {
+  const road = new THREE.Mesh(new THREE.BoxGeometry(2 * LANE_W, 0.02, SEG + 0.08), asphalt);
+  const eL = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.012, SEG + 0.08), paint);
+  const eR = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.012, SEG + 0.08), paint);
+  const dash = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.012, 1.2), paint);
+  const roadB = new THREE.Mesh(new THREE.BoxGeometry(2 * LANE_W, 0.02, SEG + 0.08), asphalt);
+  const eBL = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.012, SEG + 0.08), paint);
+  const eBR = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.012, SEG + 0.08), paint);
+  const dashB = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.012, 1.2), paint);
+  const barrier = new THREE.Mesh(new THREE.BoxGeometry(0.45, 0.75, SEG + 0.08), barrierMat);
+  for (const m of [roadB, eBL, eBR, dashB, barrier]) { m.visible = false; scene.add(m); }
+  scene.add(road, eL, eR, dash);
+  roadSegs.push({ road, eL, eR, dash, roadB, eBL, eBR, dashB, barrier });
+}
+
+/** x, z and yaw of the road at distance d ahead (+lat to the right of our lane centre). */
+function pose(d, lat, d0, th0) {
+  const dEnd = -BACK + (GRID - 1) * GRID_STEP;
+  const dd = Math.min(d, dEnd);
+  const k = clamp(Math.floor((dd + BACK) / GRID_STEP), 0, GRID - 1);
+  const phi = thetaFn(d0 + dd) - th0;
+  const cp = Math.cos(phi), sp = Math.sin(phi), ext = d - dd;
+  return { x: gx[k] + lat * cp + sp * ext, z: gz[k] + lat * sp - cp * ext, yaw: -phi };
+}
+
+function updateRoad(d0) {
+  const th0 = thetaFn(d0), k0 = Math.floor(BACK / GRID_STEP);
+  gx[k0] = 0; gz[k0] = 0;
+  for (let k = k0 + 1; k < GRID; k++) {
+    const phi = thetaFn(d0 + (k - k0 - 0.5) * GRID_STEP) - th0;
+    gx[k] = gx[k - 1] + Math.sin(phi) * GRID_STEP; gz[k] = gz[k - 1] - Math.cos(phi) * GRID_STEP;
+  }
+  for (let k = k0 - 1; k >= 0; k--) {
+    const phi = thetaFn(d0 + (k - k0 + 0.5) * GRID_STEP) - th0;
+    gx[k] = gx[k + 1] - Math.sin(phi) * GRID_STEP; gz[k] = gz[k + 1] + Math.cos(phi) * GRID_STEP;
+  }
+  const baseIdx = Math.floor(d0 / SEG), frac = d0 - baseIdx * SEG, cA = -LANE_W / 2;
+  roadSegs.forEach((s, j) => {
+    const d = -BACK + j * SEG - frac;
+    const k = clamp(Math.floor((d + BACK) / GRID_STEP), 0, GRID - 1);
+    const phi = thetaFn(d0 + d) - th0, cp = Math.cos(phi), sp = Math.sin(phi), yaw = -phi;
+    const place = (m, lat, y) => { m.position.set(gx[k] + lat * cp, y, gz[k] + lat * sp); m.rotation.y = yaw; };
+    place(s.road, cA, 0); place(s.eR, cA + LANE_W, 0.003); place(s.eL, cA - LANE_W, 0.003); place(s.dash, cA, 0.004);
+    const lv = course ? course.trafficLevelAt(s0 + (d0 - odo0) + d) : 0;
+    if (s.lv !== lv) { s.lv = lv; s.road.material = roadMats[lv]; }
+    const n = baseIdx + j - BACK / SEG;
+    const dashOn = ((n % 3) + 3) % 3 === 0;
+    s.dash.visible = dashOn;
+    s.roadB.visible = s.eBL.visible = s.eBR.visible = s.barrier.visible = hwMode; s.dashB.visible = hwMode && dashOn;
+    if (hwMode) {
+      place(s.roadB, CB, 0); place(s.eBR, CB + LANE_W, 0.003); place(s.eBL, CB - LANE_W, 0.003); place(s.dashB, CB, 0.004);
+      place(s.barrier, (cA - LANE_W + CB + LANE_W) / 2, 0.375);
+    }
+  });
+}
+
+// ------------------------------------------------------------------ roadside props (lamps and trees), recycled along the road
+function makeLamp() {
+  const g = new THREE.Group();
+  const metal = new THREE.MeshStandardMaterial({ color: 0x40464f, metalness: 0.6, roughness: 0.5 });
+  const post = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.09, 7, 8), metal); post.position.y = 3.5;
+  const arm = new THREE.Mesh(new THREE.BoxGeometry(1.8, 0.09, 0.09), metal); arm.position.set(0.9, 7, 0);
+  const lamp = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.12, 0.3), new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0xffe9b0, emissiveIntensity: 0 }));
+  lamp.position.set(1.6, 6.92, 0); lamp.name = 'bulb';
+  g.add(post, arm, lamp);
+  return g;
+}
+function makeTree(i) {
+  const g = new THREE.Group();
+  const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.25, 2.2, 6), new THREE.MeshStandardMaterial({ color: 0x6b4a2e, roughness: 1 }));
+  trunk.position.y = 1.1; g.add(trunk);
+  const leaf = new THREE.MeshStandardMaterial({ color: i % 2 ? 0x2f8f4e : 0x3d9a58, roughness: 0.9, flatShading: true });
+  for (let c = 0; c < 3; c++) {
+    const cone = new THREE.Mesh(new THREE.ConeGeometry(1.9 - c * 0.45, 2.6, 7), leaf);
+    cone.position.y = 3 + c * 1.5; g.add(cone);
+  }
+  return g;
+}
+const CATS = [
+  { name: 'lamp', spacing: 32, ahead: 100, back: 14, edge: 1.1, jitter: 0, make: makeLamp, rot: true },
+  { name: 'tree', spacing: 12, ahead: 100, back: 14, edge: 5, jitter: 7, make: makeTree, rot: false },
+];
+for (const c of CATS) {
+  c.n = Math.ceil((c.ahead + c.back) / c.spacing) + 2;
+  c.slots = [];
+  for (const side of [-1, 1]) for (let s = 0; s < c.n; s++) {
+    const obj = c.make(s); obj.visible = false; scene.add(obj); c.slots.push({ obj, side, s });
+  }
+}
+function updateProps(d0, th0) {
+  for (const c of CATS) {
+    for (const sl of c.slots) {
+      const nStart = Math.floor((d0 - c.back) / c.spacing);
+      const k = nStart + ((((sl.s - nStart) % c.n) + c.n) % c.n);
+      const d = k * c.spacing + (sl.side < 0 ? c.spacing / 2 : 0) - d0;
+      const vis = d >= -c.back && d <= c.ahead;
+      sl.obj.visible = vis;
+      if (!vis) continue;
+      const off = c.edge + c.jitter * hash(k, sl.side + 3);
+      const lat = sl.side > 0 ? 1.85 + off : (hwMode ? -18.45 : -5.55) - off;
+      const p = pose(d, lat, d0, th0);
+      sl.obj.position.set(p.x, 0, p.z);
+      sl.obj.rotation.y = p.yaw + (c.rot && sl.side > 0 ? Math.PI : 0) + (c.rot ? 0 : hash(k, 9) * 6.28);
+      if (!c.rot) { const f = 0.8 + 0.5 * hash(k, 5); sl.obj.scale.setScalar(f); }
+      const bulb = sl.obj.getObjectByName('bulb');
+      if (bulb) bulb.material.emissiveIntensity = night ? 4 : 0;
+    }
+  }
+}
+
+// ------------------------------------------------------------------ the car
+const carRoot = new THREE.Group();      // yaw / roll / pitch / park offsets
+const carInner = new THREE.Group();     // scaled, centred model
+carRoot.add(carInner);
+scene.add(carRoot);
+const wheelPairs = [];
+const lampMats = { head: [], tail: [], brake: [], sigL: [], sigR: [] };
+const bodyMats = [];
+const headSpots = [];
+let carReady = false;
+const doorPivots = [];
+
+function classifyMaterial(m) {
+  const n = (m.name || '').toLowerCase();
+  if (/^primary/.test(n)) bodyMats.push(m);
+  if (/indicator/.test(n)) (/_l/.test(n) ? lampMats.sigL : lampMats.sigR).push(m);
+  else if (/brea?k/.test(n)) lampMats.brake.push(m);
+  else if (/rear.?light/.test(n)) lampMats.tail.push(m);
+  else if (/(front.{0,6}light|fog)/.test(n)) lampMats.head.push(m);
+}
+
+const loader = new GLTFLoader().setMeshoptDecoder(MeshoptDecoder);
+loader.load('assets/tesla_model3.glb', (gltf) => {
+  const model = gltf.scene;
+  // drop the ground-reflection / fake shadow planes baked into the model
+  const junk = [];
+  model.traverse((o) => {
+    if (!o.isMesh) return;
+    const names = [o.name].concat([].concat(o.material).map((m) => m.name || "")).join(" ").toLowerCase();
+    if (/pantulan|shadow|reflection/.test(names)) junk.push(o); else [].concat(o.material).forEach(classifyMaterial);
+  });
+  junk.forEach((o) => o.parent && o.parent.remove(o));
+  // Place the car using only its body and wheels: the model also carries oversized helper meshes
+  // (wiper / steering parts) that reach the floor and 4 m up, which used to lift the car into the air.
+  model.updateMatrixWorld(true);
+  const ref = new THREE.Box3(), wheelBox = new THREE.Box3();
+  model.traverse((o) => {
+    if (!o.isMesh) return;
+    const b = new THREE.Box3().setFromObject(o);
+    if (/^wheels_/.test(o.name)) { ref.union(b); wheelBox.union(b); }
+    else if (/^body/.test(o.name)) ref.union(b);
+  });
+  const stray = [];
+  model.traverse((o) => {
+    if (!o.isMesh) return;
+    const b = new THREE.Box3().setFromObject(o);
+    if (b.min.y < wheelBox.min.y - 0.9) stray.push(o);   // only the helper mesh that reaches far below the wheels
+  });
+  stray.forEach((o) => o.parent && o.parent.remove(o));
+  const size = ref.getSize(new THREE.Vector3());
+  const s = CAR_LEN / Math.max(size.x, size.z);
+  const c = ref.getCenter(new THREE.Vector3());
+  carInner.add(model);
+  carInner.scale.setScalar(s);
+  carInner.position.set(-c.x * s, -wheelBox.min.y * s, -c.z * s);
+  carInner.updateMatrixWorld(true);
+  const box = new THREE.Box3().setFromObject(model);
+
+  // wheel pairs ("wheels" = front pair, "wheels001" = rear pair): spin about the lateral axis through their centre
+  model.traverse((o) => {
+    if (/^wheels(001)?$/.test(o.name)) {
+      const b = new THREE.Box3().setFromObject(o);
+      const centre = b.getCenter(new THREE.Vector3());
+      const pivot = new THREE.Group();
+      carRoot.add(pivot);
+      pivot.position.copy(centre);                 // world == carRoot space here (carRoot is at the origin)
+      pivot.updateMatrixWorld(true);
+      pivot.attach(o);
+      wheelPairs.push(pivot);
+    }
+  });
+
+  // doors: hinge at the front edge of each door, swing about the vertical axis
+  model.traverse((o) => {
+    if (!/^door_(lf|lr|rf|rr)$/.test(o.name)) return;
+    const b = new THREE.Box3().setFromObject(o), c = b.getCenter(new THREE.Vector3());
+    const pivot = new THREE.Group();
+    carRoot.add(pivot); pivot.position.set(c.x, c.y, b.min.z); pivot.updateMatrixWorld(true);
+    pivot.attach(o);
+    doorPivots.push({ pivot, sign: c.x >= 0 ? 1 : -1 });
+  });
+
+  // headlight beams
+  const len = box.max.z - box.min.z;
+  for (const sx of [-0.7, 0.7]) {
+    const sp = new THREE.SpotLight(0xfff2cc, 0, 60, 0.45, 0.5, 1.5);
+    sp.position.set(sx, 0.7, -len / 2 + 0.2);
+    sp.target.position.set(sx * 0.9, 0.2, -len / 2 - 20);
+    carRoot.add(sp, sp.target);
+    headSpots.push(sp);
+  }
+  carReady = true;
+  $('loading').classList.add('done');
+}, (e) => { if (e.total) $('loadmsg').textContent = 'Cargando el coche… ' + Math.round(100 * e.loaded / e.total) + '%'; },
+(err) => { $('loadmsg').textContent = 'No se pudo cargar el coche: ' + (err.message || err); });
+
+// paint chips
+const PAINTS = [['#eeeeee', null], ['#f5f5f5', 0xf2f2f2], ['#111111', 0x0a0a0a], ['#c0121c', 0xc0121c], ['#1f4fc0', 0x1f4fc0], ['#2a9d4b', 0x2a9d4b], ['#a8abb0', 0xa8abb0], ['#e8730c', 0xe8730c]];
+const origColors = new Map();
+PAINTS.forEach(([css, hex], idx) => {
+  const chip = document.createElement('i'); chip.style.background = idx === 0 ? 'conic-gradient(#999,#fff,#999)' : css;
+  chip.onclick = () => {
+    for (const m of bodyMats) {
+      if (!origColors.has(m)) origColors.set(m, m.color.clone());
+      if (idx === 0) m.color.copy(origColors.get(m)); else m.color.setHex(hex);
+    }
+  };
+  $('colors').appendChild(chip);
+});
+
+// ------------------------------------------------------------------ state
+const st = {
+  speedKmh: 0, odo: 0, gps: true, gpsOk: false, gpsKmh: 0, gpsStamp: 0,
+  headlights: false, hazard: false, follow: true, door: 0, doorTarget: 0,
+  prevSpeed: 0, decel: 0, brakeHold: 0, park: 0, wheelAngle: 0,
+  cam: { yaw: 0, pitch: 11, dist: 6.8 }, lastTouch: 0,
+};
+
+function setLamps(mats, on, color, intensity) {
+  for (const m of mats) {
+    m.emissive.setHex(color);
+    m.emissiveIntensity = on ? intensity : 0;
+  }
+}
+
+// ------------------------------------------------------------------ input: camera, buttons, GPS
+const pointers = new Map();
+canvas.addEventListener('pointerdown', (e) => { canvas.setPointerCapture(e.pointerId); pointers.set(e.pointerId, { x: e.clientX, y: e.clientY }); st.lastTouch = performance.now(); });
+canvas.addEventListener('pointerup', (e) => pointers.delete(e.pointerId));
+canvas.addEventListener('pointercancel', (e) => pointers.delete(e.pointerId));
+canvas.addEventListener('pointermove', (e) => {
+  const p = pointers.get(e.pointerId); if (!p) return;
+  const dx = e.clientX - p.x, dy = e.clientY - p.y;
+  if (pointers.size === 1) {
+    st.cam.yaw -= dx * 0.35 * Math.PI / 180; st.cam.pitch = clamp(st.cam.pitch + dy * 0.25, -5, 80);
+  } else if (pointers.size === 2) {
+    const [a, b] = [...pointers.values()];
+    const before = Math.hypot(a.x - b.x, a.y - b.y);
+    p.x = e.clientX; p.y = e.clientY;
+    const after = Math.hypot(a.x - b.x, a.y - b.y);
+    if (before > 0) st.cam.dist = clamp(st.cam.dist * before / after, 3.2, 20);
+  }
+  p.x = e.clientX; p.y = e.clientY; st.lastTouch = performance.now();
+});
+canvas.addEventListener('wheel', (e) => { st.cam.dist = clamp(st.cam.dist * (1 + e.deltaY * 0.001), 3.2, 20); st.lastTouch = performance.now(); }, { passive: true });
+
+const toggle = (id, on) => $(id).classList.toggle('on', on);
+$('bNight').onclick = () => { night = !night; applyTheme(); };
+$('bLights').onclick = () => { st.headlights = !st.headlights; toggle('bLights', st.headlights); };
+$('bHazard').onclick = () => { st.hazard = !st.hazard; toggle('bHazard', st.hazard); };
+$('bCam').onclick = () => { st.follow = !st.follow; toggle('bCam', st.follow); };
+$('bGps').onclick = () => { st.gps = !st.gps; updateGpsUi(); if (st.gps) startGps(); };
+$('bDoors').onclick = () => { st.doorTarget = st.doorTarget ? 0 : 1; toggle('bDoors', !!st.doorTarget); };
+const ROAD_LABEL = { auto: 'Vía: automática (ruta y GPS)', city: 'Vía: carretera', hw: 'Vía: autopista 2+2' };
+$('bRoad').onclick = () => { roadMode = roadMode === 'auto' ? 'city' : roadMode === 'city' ? 'hw' : 'auto'; $('bRoad').title = ROAD_LABEL[roadMode]; toggle('bRoad', roadMode !== 'auto'); say(ROAD_LABEL[roadMode]); };
+$('bInfo').onclick = () => { $('credits').hidden = false; };
+$('closeCredits').onclick = () => { $('credits').hidden = true; };
+$('manualSlider').oninput = (e) => { st.speedKmh = +e.target.value; $('manualOut').textContent = e.target.value; };
+toggle('bCam', true); toggle('bGps', true);
+
+function updateGpsUi() {
+  toggle('bGps', st.gps);
+  const useGps = st.gps && st.gpsOk;
+  $('manual').classList.toggle('hidden', useGps);
+  $('gpsstate').textContent = !st.gps ? 'GPS: apagado (velocidad manual)' : st.gpsOk ? 'GPS: activo' : 'GPS: esperando…';
+}
+
+let watchId = null;
+function startGps() {
+  if (!('geolocation' in navigator) || watchId !== null) return;
+  watchId = navigator.geolocation.watchPosition((pos) => {
+    st.gpsOk = true; st.gpsStamp = performance.now();
+    onFix(pos.coords);
+    st.gpsKmh = pos.coords.speed != null ? pos.coords.speed * 3.6 : 0;
+    updateGpsUi();
+  }, (err) => {
+    st.gpsOk = false; $('gpsstate').textContent = 'GPS: ' + (err.code === 1 ? 'permiso denegado (velocidad manual)' : 'sin señal (velocidad manual)'); updateGpsUi();
+    if (err.code === 1) { st.gps = false; toggle('bGps', false); $('manual').classList.remove('hidden'); }
+  }, { enableHighAccuracy: true, maximumAge: 1000, timeout: 15000 });
+}
+updateGpsUi();
+startGps();
+
+// keep the screen on while the page is open
+let wake = null;
+async function keepAwake() { try { if ('wakeLock' in navigator && !wake) { wake = await navigator.wakeLock.request('screen'); wake.addEventListener('release', () => { wake = null; }); } } catch (e) { /* not available */ } }
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') keepAwake(); });
+window.addEventListener('pointerdown', keepAwake, { once: true });
+keepAwake();
+
+let applyTheme = function () {
+  const t = night ? NIGHT : DAY;
+  scene.background = new THREE.Color(t.bg);
+  scene.fog = new THREE.Fog(t.fog, 35, 150);
+  sun.intensity = t.sun; hemi.intensity = t.hemi; scene.environmentIntensity = t.env;
+  asphalt.color.setHex(t.asphalt); grassMat.color.setHex(t.grass);
+  TINTS.forEach((c, i) => roadMats[i + 1].color.setHex(c).multiplyScalar(night ? 0.45 : 1));
+  $('bNight').textContent = night ? '☀️' : '🌙';
+};
+applyTheme();
+
+// ------------------------------------------------------------------ resize
+function resize() {
+  const w = window.innerWidth, h = window.innerHeight;
+  renderer.setSize(w, h, false);
+  camera.aspect = w / h; camera.fov = w / h < 1 ? 58 : 45; camera.updateProjectionMatrix();
+}
+window.addEventListener('resize', resize); resize();
+
+// ------------------------------------------------------------------ main loop
+const ring = $('ringfg'), kmhEl = $('kmh');
+let last = performance.now(), frames = 0, fpsT = last;
+function frame(now) {
+  requestAnimationFrame(frame);
+  const dt = Math.min(0.1, (now - last) / 1000); last = now;
+  frames++; if (now - fpsT >= 1000) { $('fps').textContent = frames + ' fps'; frames = 0; fpsT = now; }
+
+  // speed: GPS (smoothed) or the manual slider
+  if (st.gps && st.gpsOk) {
+    const fresh = now - st.gpsStamp < 4000;
+    st.speedKmh += ((fresh ? st.gpsKmh : 0) - st.speedKmh) * Math.min(1, dt * 3);
+  }
+  const v = st.speedKmh / 3.6;
+  st.odo += v * dt;
+  routeFrame();
+  hudFrame();
+  kmhEl.textContent = Math.round(st.speedKmh);
+  ring.style.strokeDasharray = (209.44 * clamp(st.speedKmh / 240, 0, 1)) + ' 314.16';
+
+  // braking is read from the speed itself; parked look at standstill
+  const dv = (st.prevSpeed - st.speedKmh) / Math.max(dt, 0.001);
+  st.decel += (dv - st.decel) * Math.min(1, dt * 4); st.prevSpeed = st.speedKmh;
+  st.brakeHold = st.speedKmh > 3 && st.decel > 6 ? 0.5 : Math.max(0, st.brakeHold - dt);
+  const braking = st.brakeHold > 0;
+  st.park += ((st.speedKmh < 1.5 ? 1 : 0) - st.park) * Math.min(1, dt * 1.4);
+  const moving = st.speedKmh > 3 ? 1 : 0;
+  const pitch = (-Math.min(1, Math.max(0, st.decel) / 18) * 2.6 + Math.min(1, Math.max(0, -st.decel) / 14) * 1.4) * moving;
+
+  hwMode = computeHw();
+  updateRoad(st.odo);
+  const th0 = thetaFn(st.odo);
+  updateProps(st.odo, th0);
+  updateBuildings(st.odo, th0);
+  updateSigns(st.odo, th0);
+
+  if (carReady) {
+    const kap = kappa(st.odo);
+    const steer = clamp(-kap * 450, -9, 9), lean = clamp(kap * v * 25, -4, 4);
+    const rad = Math.PI / 180;
+    carRoot.rotation.set(pitch * rad, (steer - 8 * st.park) * rad, lean * rad, 'YXZ');
+    carRoot.position.set(0.55 * st.park, 0, 0);
+    st.wheelAngle += v / 0.34 * dt;
+    for (const w of wheelPairs) w.rotation.x = -st.wheelAngle;
+    st.door += (st.doorTarget - st.door) * Math.min(1, dt * 4);
+    for (const d of doorPivots) d.pivot.rotation.y = d.sign * 35 * Math.PI / 180 * st.door;
+
+    const blink = Math.floor(now / 625) % 2 === 0;
+    setLamps(lampMats.head, st.headlights, 0xfff0c0, 3);
+    setLamps(lampMats.tail, st.headlights || braking, 0xff1c10, 1.6);
+    setLamps(lampMats.brake, braking, 0xff1c10, 3.5);
+    setLamps(lampMats.sigL, st.hazard && blink, 0xff8c00, 4);
+    setLamps(lampMats.sigR, st.hazard && blink, 0xff8c00, 4);
+    for (const sp of headSpots) sp.intensity = st.headlights ? (night ? 250 : 60) : 0;
+  }
+
+  // camera: orbit around the car, easing back behind it after a moment when "follow" is on
+  const c = st.cam;
+  if (st.follow && now - st.lastTouch > 1500) {
+    const k = Math.min(1, dt * 2.5);
+    const dYaw = ((((0 - c.yaw) % (2 * Math.PI)) + 3 * Math.PI) % (2 * Math.PI)) - Math.PI;
+    c.yaw += dYaw * k; c.pitch += (11 - c.pitch) * k; c.dist += ((6.8 + st.speedKmh / 200 * 2.8) - c.dist) * k;
+  }
+  const pr = c.pitch * Math.PI / 180;
+  camera.position.set(Math.sin(c.yaw) * Math.cos(pr) * c.dist + carRoot.position.x, 0.7 + Math.sin(pr) * c.dist, Math.cos(c.yaw) * Math.cos(pr) * c.dist);
+  camera.lookAt(carRoot.position.x, 0.7, 0);
+
+  renderer.render(scene, camera);
+}
+requestAnimationFrame(frame);
+
+
+// ------------------------------------------------------------------ phase 2: places, routes, mini map
+const store = {
+  get(k, d) { try { return JSON.parse(localStorage.getItem('d3d.' + k)) ?? d; } catch (e) { return d; } },
+  set(k, v) { try { localStorage.setItem('d3d.' + k, JSON.stringify(v)); } catch (e) { /* private mode */ } },
+};
+let ttKey = store.get('tomtom', '');
+const favs = store.get('favs', []), recents = store.get('recents', []);
+let home = store.get('home', null);
+const rt = { dest: null, demo: false, lastS: 0, off: 0, offCount: 0, lastReroute: 0, rerouting: false, drawnS: -1e9, mapLat: 0, mapLon: 0, mapBrg: 0, mapValid: false,
+  limit: null, alts: [], traffic: null, infoAt: 0, infoLat: 0, infoLon: 0, infoBusy: false };
+const q = new URLSearchParams(location.search);
+if (q.get('lat')) st.pos = { lat: +q.get('lat'), lon: +q.get('lon'), heading: 0 };   // for testing without GPS: ?lat=..&lon=..
+const samePlace = (a, b) => Math.abs(a.lat - b.lat) < 0.0002 && Math.abs(a.lon - b.lon) < 0.0002;
+const isFav = (p) => favs.some((f) => samePlace(f, p));
+const say = (txt) => { const el = $('routeStatus'); el.textContent = txt; el.hidden = !txt; if (txt) { clearTimeout(say.t); say.t = setTimeout(() => { el.hidden = true; }, 5000); } };
+onNote((m) => { $('keyNote').textContent = m; });
+
+function onFix(co) {
+  st.pos = { lat: co.latitude, lon: co.longitude, heading: co.heading };
+  store.set('lastpos', { lat: co.latitude, lon: co.longitude });
+  if (!course || rt.demo) return;
+  const p = course.project(co.latitude, co.longitude, rt.lastS);
+  rt.lastS = p[0]; rt.off = p[1]; s0 = p[0]; odo0 = st.odo;
+  rt.offCount = rt.off > 50 ? rt.offCount + 1 : 0;
+  if (rt.offCount >= 4 && (co.speed || 0) > 2 && performance.now() - rt.lastReroute > 20000 && rt.dest && !rt.rerouting) reroute();
+}
+
+async function reroute() {
+  rt.rerouting = true; rt.lastReroute = performance.now(); rt.offCount = 0; say('↻ Recalculando ruta…');
+  try { const rs = await routesTo(st.pos, rt.dest, ttKey); setRoute(rs[0], rt.dest, false, rs.slice(1)); say('Ruta recalculada'); } catch (e) { say('No se pudo recalcular la ruta'); }
+  rt.rerouting = false;
+}
+
+function setRoute(r, dest, demo, alts = []) {
+  course = r; rt.dest = dest; rt.demo = !!demo; rt.lastS = 0; rt.off = 0; rt.offCount = 0; s0 = 0; odo0 = st.odo; rt.drawnS = -1e9;
+  rt.alts = alts; voice.reset();
+  $('bCancel').hidden = false; $('maneuver').hidden = false;
+  // route from a free service: colour it with TomTom's traffic flow if the key allows it
+  if (!demo && ttKey && r.travelSec === 0) {
+    r.viaFlow = true;
+    flowTraffic(r, 0, ttKey).then((tr) => { if (course === r) { r.traffic = tr; rt.drawnS = -1e9; } });
+  }
+}
+/** Stop the selected route and go back to free driving (procedural road, no manoeuvres). */
+function clearRoute() {
+  course = null; rt.dest = null; rt.demo = false; rt.rerouting = false; rt.drawnS = -1e9; rt.alts = []; rt.traffic = null; voice.reset(); $('trafficCard').hidden = true;
+  $('bCancel').hidden = true; $('maneuver').hidden = true;
+  drawRoute(0);
+  if (st.pos) { rt.mapLat = st.pos.lat; rt.mapLon = st.pos.lon; rt.mapBrg = st.pos.heading || 0; rt.mapValid = true; } else rt.mapValid = false;
+  say('Ruta cancelada');
+}
+$('bCancel').onclick = clearRoute;
+$('mStop').onclick = clearRoute;
+
+function routeFrame() {
+  if (!course) return;
+  const sN = s0 + (st.odo - odo0);
+  const p = course.pose(sN);
+  rt.mapLat = p[0]; rt.mapLon = p[1]; rt.mapBrg = p[2]; rt.mapValid = true;
+  const nx = course.next(sN), hw = course.isMotorway(sN + 40);
+  const man = $('maneuver');
+  man.classList.toggle('hw', hw);
+  if (nx) {
+    $('mArrow').textContent = ARROWS[nx.step.kind] || '↑';
+    $('mText').textContent = stepLabel(nx.step, hw);
+    const d = Math.round(nx.dist / 10) * 10;
+    $('mDist').textContent = d >= 1000 ? (d / 1000).toFixed(1) + ' km' : d + ' m';
+  } else { $('mArrow').textContent = '🏁'; $('mText').textContent = 'Destino'; $('mDist').textContent = ''; }
+  // traffic ahead (card + voice) and the alternative route, if there is a faster one
+  const nt = course.nextTraffic(sN);
+  const traffic = nt ? { level: nt[2], dist: Math.max(0, Math.round((nt[0] - sN) / 10) * 10), len: Math.round((nt[1] - Math.max(nt[0], sN)) / 10) * 10, delayMin: Math.round(nt[3] / 60) } : null;
+  rt.traffic = traffic;
+  const alt = bestAlt();
+  showTraffic(traffic, alt);
+  voice.update({ route: course, sN, highway: hw, now: performance.now(), traffic, alt: alt ? { saveMin: alt.save } : null });
+  if (Math.abs(sN - rt.drawnS) > 5) { rt.drawnS = sN; drawRoute(sN); }
+}
+
+// --- mini map (MapLibre GL JS, OpenFreeMap tiles)
+const STYLE_DAY = 'https://tiles.openfreemap.org/styles/positron', STYLE_NIGHT = 'https://tiles.openfreemap.org/styles/dark';
+let map = null, mapStyleReady = false;
+function setupMap() {
+  if (!window.maplibregl) return;
+  map = new maplibregl.Map({ container: 'minimap', style: night ? STYLE_NIGHT : STYLE_DAY, center: [-2.935, 43.263], zoom: 15, pitch: 48,
+    interactive: false, attributionControl: false, fadeDuration: 0 });
+  map.on('style.load', () => {
+    map.addSource('route-done', { type: 'geojson', data: empty() });
+    map.addLayer({ id: 'route-done-line', type: 'line', source: 'route-done', layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': '#9aa0a6', 'line-width': 6 } });
+    map.addSource('route', { type: 'geojson', data: empty() });
+    map.addLayer({ id: 'route-casing', type: 'line', source: 'route', layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': '#0b3d91', 'line-width': 10 } });
+    map.addLayer({ id: 'route-line', type: 'line', source: 'route', layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': ['match', ['to-number', ['get', 'lvl']], 1, '#f5d000', 2, '#ff8a00', 3, '#e53935', '#29b6f6'], 'line-width': 6 } });
+    map.addSource('dest', { type: 'geojson', data: empty() });
+    map.addLayer({ id: 'dest-dot', type: 'circle', source: 'dest', paint: { 'circle-radius': 8, 'circle-color': '#e53935', 'circle-stroke-color': '#fff', 'circle-stroke-width': 2.5 } });
+    mapStyleReady = true; rt.drawnS = -1e9;
+  });
+  setInterval(() => {
+    if (!rt.mapValid) return;
+    const pad = $('minimap').clientHeight * 0.42;
+    map.jumpTo({ center: [rt.mapLon, rt.mapLat], bearing: rt.mapBrg, zoom: 16.2, pitch: 48, padding: { top: pad, bottom: 0, left: 0, right: 0 } });
+  }, 450);
+}
+const empty = () => ({ type: 'FeatureCollection', features: [] });
+function drawRoute(sN) {
+  if (!map || !mapStyleReady) return;
+  const done = map.getSource('route-done'), todo = map.getSource('route'), dest = map.getSource('dest');
+  if (!done || !todo || !dest) return;
+  if (!course) { done.setData(empty()); todo.setData(empty()); dest.setData(empty()); return; }
+  const line = (pts) => ({ type: 'Feature', geometry: { type: 'LineString', coordinates: pts } });
+  const s = Math.min(Math.max(sN, 0), course.total);
+  done.setData(s > 2 ? line(course.line(0, s)) : empty());
+  // ahead of the car: one feature per stretch, coloured by traffic level
+  const feats = [];
+  let cur = s;
+  const add = (x, y, lvl) => { if (y - x >= 1) feats.push({ type: 'Feature', properties: { lvl }, geometry: { type: 'LineString', coordinates: course.line(x, y) } }); };
+  for (const r of [...course.traffic].sort((p, q) => p[0] - q[0])) {
+    const x = Math.max(r[0], cur), y = Math.min(r[1], course.total);
+    if (y <= x) continue;
+    if (x > cur) add(cur, x, 0);
+    add(x, y, r[2]); cur = y;
+  }
+  if (cur < course.total) add(cur, course.total, 0);
+  todo.setData({ type: 'FeatureCollection', features: feats });
+  const end = course.pose(course.total);
+  dest.setData({ type: 'Feature', geometry: { type: 'Point', coordinates: [end[1], end[0]] } });
+}
+const baseApplyTheme = applyTheme;
+applyTheme = function () { baseApplyTheme(); if (map) { mapStyleReady = false; map.setStyle(night ? STYLE_NIGHT : STYLE_DAY); } };
+setupMap();
+
+// --- places search: recents and favourites that match what you type, plus live suggestions; drag down = home
+function origin() {
+  if (st.pos) return st.pos;
+  const last = store.get('lastpos', null);
+  return last ? { lat: last.lat, lon: last.lon } : null;
+}
+async function startRoute(p) {
+  const o = origin();
+  if (!o) { say('Sin posición GPS: activa la ubicación (o usa «Ruta de prueba» en ⚙️)'); return; }
+  say('Calculando ruta…');
+  addRecent(p);
+  try { const rs = await routesTo(o, p, ttKey), r = rs[0]; setRoute(r, p, false, rs.slice(1)); say('Ruta a ' + p.name.split(',')[0] + ' · ' + (r.total / 1000).toFixed(1) + ' km'); }
+  catch (e) { say('No se pudo calcular la ruta (¿hay internet?)'); }
+}
+function addRecent(p) {
+  const i = recents.findIndex((r) => samePlace(r, p)); if (i >= 0) recents.splice(i, 1);
+  recents.unshift({ name: p.name, lat: p.lat, lon: p.lon }); recents.length = Math.min(recents.length, 12); store.set('recents', recents);
+}
+function toggleFav(p) {
+  const i = favs.findIndex((f) => samePlace(f, p));
+  if (i >= 0) { if (home && samePlace(home, p)) { home = null; store.set('home', null); } favs.splice(i, 1); } else favs.unshift({ name: p.name, lat: p.lat, lon: p.lon });
+  store.set('favs', favs);
+}
+function setHome(p) { if (!isFav(p)) toggleFav(p); home = { name: p.name, lat: p.lat, lon: p.lon }; store.set('home', home); }
+
+let live = [], liveTimer = null, liveFor = '';
+function renderResults() {
+  const text = $('q').value.trim().toLowerCase();
+  const local = [...favs.map((p) => [p, '⭐']), ...recents.filter((r) => !isFav(r)).map((p) => [p, '🕘'])]
+    .filter(([p]) => !text || p.name.toLowerCase().includes(text));
+  const extra = live.filter((l) => !local.some(([p]) => p.name === l.name)).map((p) => [p, '📍']);
+  const box = $('results'); box.innerHTML = '';
+  for (const [p, icon] of [...local, ...extra]) {
+    const row = document.createElement('div'); row.className = 'it';
+    row.innerHTML = '<span>' + icon + '</span><span class="n"></span>';
+    row.querySelector('.n').textContent = p.name;
+    if (isFav(p)) { const hb = document.createElement('button'); hb.textContent = home && samePlace(home, p) ? '🏠' : '🏡'; hb.onclick = (e) => { e.stopPropagation(); setHome(p); renderResults(); }; row.appendChild(hb); }
+    const sb = document.createElement('button'); sb.textContent = isFav(p) ? '★' : '☆'; sb.onclick = (e) => { e.stopPropagation(); toggleFav(p); renderResults(); }; row.appendChild(sb);
+    row.onclick = () => { closeSearch(); startRoute(p); };
+    box.appendChild(row);
+  }
+  if (!box.children.length) { const e = document.createElement('div'); e.className = 'empty'; e.textContent = text.length < 3 ? 'Escribe al menos 3 letras' : (liveFor === text ? 'Sin resultados' : 'Buscando…'); box.appendChild(e); }
+}
+$('q').addEventListener('input', () => {
+  clearTimeout(liveTimer); live = []; renderResults();
+  const text = $('q').value.trim();
+  if (text.length < 3) return;
+  liveTimer = setTimeout(async () => { const res = await search(text, origin(), ttKey); if ($('q').value.trim() === text) { live = res; liveFor = text.toLowerCase(); renderResults(); } }, 350);
+});
+function openSearch() { $('searchbar').hidden = false; $('hint').className = ''; $('hint').textContent = '↓ Arrastra hacia abajo para ir a casa' + (home ? '' : ' (marca 🏠 en un favorito)'); $('q').value = ''; live = []; renderResults(); setTimeout(() => $('q').focus(), 50); }
+function closeSearch() { $('searchbar').hidden = true; $('q').blur(); }
+$('bSearch').onclick = openSearch;
+$('closeSearch').onclick = closeSearch;
+let dragY = null;
+const panel = document.querySelector('#searchbar .panel');
+panel.addEventListener('pointerdown', (e) => { dragY = e.target.tagName === 'INPUT' ? null : e.clientY; });
+panel.addEventListener('pointerup', (e) => {
+  if (dragY !== null && e.clientY - dragY > 110) {
+    if (home) { closeSearch(); startRoute(home); } else { $('hint').className = 'warn'; $('hint').textContent = 'No hay casa guardada: pulsa 🏠 en un favorito'; }
+  }
+  dragY = null;
+});
+
+// --- settings (TomTom key stays in this browser only) and the test route
+$('ttKey').value = ttKey;
+$('bSettings').onclick = () => { $('settings').hidden = false; };
+$('closeSettings').onclick = () => { ttKey = $('ttKey').value.trim(); store.set('tomtom', ttKey); $('settings').hidden = true; };
+window.d3d = { testRoute: () => { const o = origin() || { lat: 43.263, lon: -2.935 }; const r = testRoute(o.lat, o.lon); setRoute(r, null, true, [testAlternative(r)]); rt.limit = 90; say('Ruta de prueba'); }, clearRoute, voice: null };
+$('bTest').onclick = () => { $('settings').hidden = true; window.d3d.testRoute(); };
+$('bClear').onclick = () => { $('settings').hidden = true; clearRoute(); };
+
+
+// ------------------------------------------------------------------ phase 3: direction / limit signs, traffic card, voice, speed limit
+const voice = new VoiceGuide();
+window.d3d.voice = voice;
+$('bVoice').onclick = () => { voice.enabled = !voice.enabled; toggle('bVoice', voice.enabled); if (!voice.enabled && voice.ok) speechSynthesis.cancel(); };
+window.addEventListener('pointerdown', () => voice.unlock(), { once: true });
+
+function makeSign(w, h, poleH, plateY) {
+  const g = new THREE.Group();
+  const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, poleH, 8), new THREE.MeshStandardMaterial({ color: 0x808890, metalness: 0.5, roughness: 0.5 }));
+  pole.position.y = poleH / 2;
+  const plate = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshBasicMaterial({ transparent: true, side: THREE.DoubleSide }));
+  plate.position.set(0, plateY, 0.07);
+  g.add(pole, plate); g.visible = false; scene.add(g);
+  return { g, plate };
+}
+const dirSign = makeSign(1.9, 1.0, 3.0, 3.05), limSign = makeSign(0.9, 0.9, 2.6, 2.6);
+function setMap(sign, tex) { const m = sign.plate.material; if (m.map !== tex) { m.map = tex; m.needsUpdate = true; } }
+
+/** Direction plate ~70 m before each manoeuvre (blue on motorways, white elsewhere) and a limit sign every 450 m. */
+function updateSigns(d0, th0) {
+  const sN = s0 + (d0 - odo0);
+  const nx = course ? course.next(sN) : null;
+  const dd = nx ? nx.dist - 70 : 999;
+  dirSign.g.visible = !!nx && dd < 230 && dd > -20;
+  if (dirSign.g.visible) {
+    const hw = course.isMotorway(sN + 40), p = pose(dd, 3.55, d0, th0);
+    dirSign.g.position.set(p.x, 0, p.z); dirSign.g.rotation.y = p.yaw;
+    setMap(dirSign, directionTexture(hw, nx.step.kind, stepLabel(nx.step, hw), nx.step.exitNo));
+  }
+  const ld = Math.ceil((d0 - 10) / 450) * 450 - d0;
+  limSign.g.visible = rt.limit != null && ld < 190;
+  if (limSign.g.visible) {
+    const p = pose(ld, 3.15, d0, th0);
+    limSign.g.position.set(p.x, 0, p.z); limSign.g.rotation.y = p.yaw;
+    setMap(limSign, limitTexture(rt.limit));
+  }
+}
+
+// --- speed limit in the HUD, and the speedometer ring turns red when over it
+let shownLimit = undefined;
+function hudFrame() {
+  if (shownLimit !== rt.limit) { shownLimit = rt.limit; $('limit').hidden = rt.limit == null; $('limit').textContent = rt.limit ?? ''; }
+  const over = rt.limit != null && st.speedKmh > rt.limit + 3;
+  ring.style.stroke = over ? '#ff5252' : '';
+}
+
+// --- traffic card (colour = level) with the alternative-route button
+const TC = ['', '#f5d000', '#ff8a00', '#e53935'];
+function bestAlt() {
+  if (!course || !(course.travelSec > 0)) return null;
+  let best = null;
+  for (const a of rt.alts) { const save = Math.round((course.travelSec - a.travelSec) / 60); if (save >= 1 && (!best || save > best.save)) best = { a, save }; }
+  return best;
+}
+let shownCard = '';
+function showTraffic(t, alt) {
+  const card = $('trafficCard');
+  if (!t) { if (!card.hidden) card.hidden = true; shownCard = ''; return; }
+  const key = t.level + '|' + t.dist + '|' + t.len + '|' + t.delayMin + '|' + (alt ? alt.save : 0);
+  if (key === shownCard) return;
+  shownCard = key; card.hidden = false; card.style.setProperty('--tc', TC[t.level]);
+  const title = t.level === 1 ? 'Tráfico' : t.level === 2 ? 'Tráfico denso' : 'Caravana o corte';
+  $('tcTitle').textContent = title + (t.dist > 0 ? ' en ' + (t.dist >= 1000 ? (t.dist / 1000).toFixed(1) + ' km' : t.dist + ' m') : ' ahora');
+  $('tcDetail').textContent = (t.len > 0 ? t.len + ' m' : '') + (t.delayMin > 0 ? ' · +' + t.delayMin + ' min' : '');
+  const b = $('tcAlt'); b.hidden = !alt; if (alt) b.textContent = 'Alternativa: −' + alt.save + ' min';
+}
+$('tcAlt').onclick = () => { const alt = bestAlt(); if (alt) { setRoute(alt.a, rt.dest, rt.demo, []); say('Ruta alternativa · ' + (alt.a.total / 1000).toFixed(1) + ' km'); } };
+
+// --- speed limit of the road under the car (OpenStreetMap), every ~60 m
+setInterval(async () => {
+  if (rt.demo || rt.infoBusy) return;
+  const lat = rt.mapValid ? rt.mapLat : st.pos && st.pos.lat, lon = rt.mapValid ? rt.mapLon : st.pos && st.pos.lon;
+  if (lat == null) return;
+  const moved = Math.abs(lat - rt.infoLat) * 110540 + Math.abs(lon - rt.infoLon) * 111320 * Math.cos(lat * Math.PI / 180), now = performance.now();
+  if (moved < 60 && now - rt.infoAt < 45000) return;
+  rt.infoBusy = true; rt.infoLat = lat; rt.infoLon = lon; rt.infoAt = now;
+  try { const info = await roadInfo(lat, lon); if (info) { rt.limit = info.limit; rt.motorway = info.motorway; } } catch (e) { /* offline */ } finally { rt.infoBusy = false; }
+}, 3000);
+
+// --- every 4 minutes: fresh traffic (same road -> new colours; a faster different road -> offered as alternative)
+setInterval(async () => {
+  if (!course || rt.demo || !rt.dest || !ttKey || rt.rerouting) return;
+  const cur = course, sNow = s0 + (st.odo - odo0);
+  try {
+    if (cur.viaFlow) { const tr = await flowTraffic(cur, sNow, ttKey); if (course === cur) { cur.traffic = tr; rt.drawnS = -1e9; } return; }
+    const from = origin(); if (!from) return;
+    const rs = await routesTo(from, rt.dest, ttKey);
+    if (course !== cur) return;
+    const same = rs.find((r) => r.similarTo(cur));
+    if (same) { cur.traffic = same.traffic; cur.travelSec = same.travelSec; rt.alts = rs.filter((r) => r !== same); rt.drawnS = -1e9; }
+    else rt.alts = rs.filter((r) => r.travelSec < cur.travelSec * (1 - sNow / cur.total) - 60);
+  } catch (e) { /* keep what we have */ }
+}, 240000);
+
+// ------------------------------------------------------------------ phase 4: road type, buildings
+function computeHw() {
+  if (roadMode === 'hw') return true;
+  if (roadMode === 'city') return false;
+  if (course) return course.isMotorway(s0 + (st.odo - odo0) + 40);
+  return !!rt.motorway;
+}
+
+// Buildings (CC BY models, compressed for the web), recycled along the road like the lamps and trees.
+const BUILD = { cats: [], loaded: false };
+function fitBuilding(root, height) {
+  root.updateMatrixWorld(true);
+  const box = new THREE.Box3().setFromObject(root), size = box.getSize(new THREE.Vector3()), c = box.getCenter(new THREE.Vector3());
+  const sc = height / Math.max(size.y, 1e-3), wrap = new THREE.Group(), inner = new THREE.Group();
+  inner.add(root); inner.scale.setScalar(sc); inner.position.set(-c.x * sc, -box.min.y * sc, -c.z * sc); wrap.add(inner);
+  wrap.userData.radius = Math.max(size.x, size.z) / 2 * sc;
+  return wrap;
+}
+async function loadBuildings() {
+  const get = (f) => new Promise((res, rej) => loader.load('assets/' + f, (g) => res(g.scene), undefined, rej));
+  const [e3, e5, brick, tower] = await Promise.all(['edificio_3.glb', 'edificio_5.glb', 'edificio_brick.glb', 'edificio_corficolombiana_colombian_skyscraper.glb'].map(get));
+  const protos = [fitBuilding(e3, 16), fitBuilding(e5, 26), fitBuilding(brick, 20)], tow = fitBuilding(tower, 120);
+  const mkCat = (spacing, ahead, back, edge, jitter, pick) => {
+    const cat = { spacing, ahead, back, edge, jitter, n: Math.ceil((ahead + back) / spacing) + 2, slots: [] };
+    for (const side of [-1, 1]) for (let s = 0; s < cat.n; s++) {
+      const proto = pick(side, s), obj = proto.clone(true); obj.visible = false; scene.add(obj);
+      cat.slots.push({ obj, side, s, radius: proto.userData.radius });
+    }
+    return cat;
+  };
+  // the heavy brick building is used only once; the others alternate
+  BUILD.cats.push(mkCat(48, 110, 22, 12, 10, (side, s) => (side > 0 && s === 2 ? protos[2] : protos[(s + (side > 0 ? 1 : 0)) % 2])));
+  BUILD.cats.push(mkCat(520, 330, 40, 60, 25, () => tow));
+  BUILD.loaded = true;
+}
+loadBuildings().catch((e) => console.warn('buildings', e));
+
+function updateBuildings(d0, th0) {
+  if (!BUILD.loaded) return;
+  for (const c of BUILD.cats) {
+    for (const sl of c.slots) {
+      const nStart = Math.floor((d0 - c.back) / c.spacing);
+      const k = nStart + ((((sl.s - nStart) % c.n) + c.n) % c.n);
+      const d = k * c.spacing + (sl.side < 0 ? c.spacing / 2 : 0) - d0;
+      const vis = !hwMode && d >= -c.back && d <= c.ahead;
+      sl.obj.visible = vis;
+      if (!vis) continue;
+      const off = c.edge + c.jitter * hash(k, sl.side + 3) + sl.radius;
+      const p = pose(d, sl.side > 0 ? 1.85 + off : -5.55 - off, d0, th0);
+      sl.obj.position.set(p.x, 0, p.z);
+      sl.obj.rotation.y = p.yaw + sl.side * Math.PI / 2;
+    }
+  }
+}
+
+if (q.get('test')) window.d3d.testRoute();
+
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
