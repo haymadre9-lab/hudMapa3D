@@ -496,7 +496,7 @@ function setRoute(r, dest, demo, alts = []) {
 /** Stop the selected route and go back to free driving (procedural road, no manoeuvres). */
 function clearRoute() {
   course = null; rt.dest = null; rt.demo = false; rt.rerouting = false; rt.drawnS = -1e9; rt.alts = []; rt.traffic = null; voice.reset(); $('trafficCard').hidden = true;
-  $('bCancel').hidden = true; $('maneuver').hidden = true;
+  $('bCancel').hidden = true; $('maneuver').hidden = true; $('tripbar').hidden = true;
   drawRoute(0);
   if (st.pos) { rt.mapLat = st.pos.lat; rt.mapLon = st.pos.lon; rt.mapBrg = st.pos.heading || 0; rt.mapValid = true; } else rt.mapValid = false;
   say('Ruta cancelada');
@@ -526,6 +526,14 @@ function routeFrame() {
   showTraffic(traffic, alt);
   voice.update({ route: course, sN, highway: hw, now: performance.now(), traffic, alt: alt ? { saveMin: alt.save } : null });
   if (Math.abs(sN - rt.drawnS) > 5) { rt.drawnS = sN; drawRoute(sN); }
+  // trip bar: km left, arrival time, time left
+  const remM = Math.max(0, course.total - sN);
+  const remSec = course.travelSec > 0 ? course.travelSec * remM / course.total : remM / (hw ? 25 : 12);
+  const mins = Math.round(remSec / 60), eta = new Date(Date.now() + remSec * 1000);
+  $('tbKm').textContent = remM >= 10000 ? Math.round(remM / 1000) + ' km' : (remM / 1000).toFixed(1) + ' km';
+  $('tbEta').textContent = String(eta.getHours()).padStart(2, '0') + ':' + String(eta.getMinutes()).padStart(2, '0');
+  $('tbMin').textContent = mins >= 60 ? Math.floor(mins / 60) + ' h ' + String(mins % 60).padStart(2, '0') + ' min' : mins + ' min';
+  $('tripbar').hidden = false;
 }
 
 // --- mini map (MapLibre GL JS, OpenFreeMap tiles)
@@ -537,10 +545,10 @@ function setupMap() {
     interactive: false, attributionControl: false, fadeDuration: 0 });
   map.on('style.load', () => {
     map.addSource('route-done', { type: 'geojson', data: empty() });
-    map.addLayer({ id: 'route-done-line', type: 'line', source: 'route-done', layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': '#9aa0a6', 'line-width': 6 } });
+    map.addLayer({ id: 'route-done-line', type: 'line', source: 'route-done', layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': '#9aa0a6', 'line-width': 8 } });
     map.addSource('route', { type: 'geojson', data: empty() });
-    map.addLayer({ id: 'route-casing', type: 'line', source: 'route', layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': '#0b3d91', 'line-width': 10 } });
-    map.addLayer({ id: 'route-line', type: 'line', source: 'route', layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': ['match', ['to-number', ['get', 'lvl']], 1, '#f5d000', 2, '#ff8a00', 3, '#e53935', '#29b6f6'], 'line-width': 6 } });
+    map.addLayer({ id: 'route-casing', type: 'line', source: 'route', layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': '#0b3d91', 'line-width': 14 } });
+    map.addLayer({ id: 'route-line', type: 'line', source: 'route', layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': ['match', ['to-number', ['get', 'lvl']], 1, '#f5d000', 2, '#ff8a00', 3, '#e53935', '#29b6f6'], 'line-width': 9 } });
     map.addSource('dest', { type: 'geojson', data: empty() });
     map.addLayer({ id: 'dest-dot', type: 'circle', source: 'dest', paint: { 'circle-radius': 8, 'circle-color': '#e53935', 'circle-stroke-color': '#fff', 'circle-stroke-width': 2.5 } });
     mapStyleReady = true; rt.drawnS = -1e9;
@@ -548,7 +556,7 @@ function setupMap() {
   setInterval(() => {
     if (!rt.mapValid) return;
     const pad = $('minimap').clientHeight * 0.42;
-    map.jumpTo({ center: [rt.mapLon, rt.mapLat], bearing: rt.mapBrg, zoom: 16.2, pitch: 48, padding: { top: pad, bottom: 0, left: 0, right: 0 } });
+    map.jumpTo({ center: [rt.mapLon, rt.mapLat], bearing: rt.mapBrg, zoom: 15.6, pitch: 48, padding: { top: pad, bottom: 0, left: 0, right: 0 } });
   }, 450);
 }
 const empty = () => ({ type: 'FeatureCollection', features: [] });
@@ -645,6 +653,7 @@ panel.addEventListener('pointerup', (e) => {
 // --- settings (TomTom key stays in this browser only) and the test route
 $('ttKey').value = ttKey;
 $('bSettings').onclick = () => { $('settings').hidden = false; };
+$('xSettings').onclick = () => { $('settings').hidden = true; };
 $('closeSettings').onclick = () => { ttKey = $('ttKey').value.trim(); store.set('tomtom', ttKey); $('settings').hidden = true; };
 window.d3d = { testRoute: () => { const o = origin() || { lat: 43.263, lon: -2.935 }; const r = testRoute(o.lat, o.lon); setRoute(r, null, true, [testAlternative(r)]); rt.limit = 90; say('Ruta de prueba'); }, clearRoute, voice: null };
 $('bTest').onclick = () => { $('settings').hidden = true; window.d3d.testRoute(); };

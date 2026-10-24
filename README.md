@@ -55,7 +55,7 @@ Publicar en GitHub Pages (dos formas, las dos valen):
 
 Si ves el README en lugar de la app, es que Pages publica la raíz sin `index.html`: sube el `index.html` de la raíz o cambia la fuente a GitHub Actions. La web usa HTTPS, necesario para el GPS.
 
-Los datos de señales y radares **no** forman parte de la web ni deben ir en un repositorio público (ver [`CREDITS.md`](CREDITS.md)).
+Los datos de señales y radares están en `app/src/main/assets/data/` (origen y aviso en [`CREDITS.md`](CREDITS.md)).
 
 ## Compilar
 

@@ -32,10 +32,8 @@ los modelos se usan solo como contenido de demostración.
 
 ## Datos
 - `app/src/main/assets/data/senales.json` y `radares.json`: puntos de stop, ceda el paso, semáforos, pasos de peatones y radares.
-  Según el autor del proyecto proceden de **TomTom** (los archivos no lo indican y no se ha podido verificar).
-  Los términos de las APIs y datos de TomTom normalmente **no permiten almacenar ni redistribuir** sus datos fuera de la aplicación del cliente,
-  por lo que **no deben publicarse en un repositorio público**. Opciones: no subirlos (la app funciona sin ellos, solo sin esas señales y radares;
-  cada usuario puede añadir sus propios archivos) o regenerarlos desde OpenStreetMap (ODbL, citando «© colaboradores de OpenStreetMap»).
+  Según el autor del proyecto proceden de **TomTom** (los archivos no lo indican y no se ha podido verificar). El autor ha decidido publicarlos en este repositorio bajo su responsabilidad.
+  Si el titular de los datos pide retirarlos, se eliminan del repositorio; regenerarlos desde OpenStreetMap (ODbL, citando «© colaboradores de OpenStreetMap») es la alternativa libre.
 - Mapas: [OpenFreeMap](https://openfreemap.org/) con datos de [OpenStreetMap](https://www.openstreetmap.org/copyright).
 - Límites de velocidad y tipo de vía: OpenStreetMap vía Overpass API.
 - Búsqueda de lugares: Photon (Komoot) y, si hay clave, TomTom. Rutas: OSRM y, si hay clave, TomTom.
