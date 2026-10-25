@@ -98,6 +98,7 @@
     <h2>Ajustes</h2>
     <div id="colors"></div>
     <div id="quick">
+    <button id="bShare" title="Compartir destino" hidden>↗️</button>
     <button id="bCancel" title="Parar la ruta" hidden>🚫</button>
     <button id="bVoice" title="Avisos por voz" class="on">🔊</button>
     <button id="bNight" title="Día / noche">🌙</button>
@@ -124,10 +125,20 @@
   </div>
 </div>
 
+<div id="placeDialog" hidden>
+  <div class="card">
+    <button id="pdX" aria-label="Cerrar">✕</button>
+    <h2 id="pdTitle"></h2>
+    <label>Nombre<input id="pdName" type="text" autocomplete="off"></label>
+    <p class="small" id="pdCoords"></p>
+    <div id="pdBtns"></div>
+  </div>
+</div>
+
 <div id="credits" hidden>
   <div class="card">
     <h2>Créditos</h2>
-    <p>Tesla 2018 Model 3 — Ameer Studio (CC BY 4.0), <a href="https://sketchfab.com/3d-models/tesla-2018-model-3-5ef9b845aaf44203b6d04e2c677e444f" target="_blank" rel="noopener">Sketchfab</a>. Comprimido y escalado para la web.</p>
+    <p>Coches (Sketchfab): Tesla Model 3 — Ameer Studio (CC BY 4.0) y versión ligera de David_Holiday (CC BY 4.0); Tesla Model Y — BloxBloger (CC BY-NC 4.0); Opel GT — systmh (CC BY-NC-SA 4.0); Datsun 130 — mononofu (CC BY 4.0); Mercedes Clase E — Peter_D (CC BY 4.0); Xiaomi SU7 — Ddiaz Design (CC BY-NC-SA 4.0); tráfico — Comrade1280 (CC BY 4.0). Comprimidos y escalados para la web. Detalle en CREDITS.md.</p>
     <p>Gráficos con <a href="https://threejs.org" target="_blank" rel="noopener">three.js</a>. Tesla y Model 3 son marcas de Tesla, Inc.; este proyecto no está afiliado a Tesla.</p>
     <button id="closeCredits">Cerrar</button>
   </div>

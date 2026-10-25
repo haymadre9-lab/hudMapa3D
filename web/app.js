@@ -6,6 +6,7 @@ import { search, routesTo, flowTraffic, roadInfo, testRoute, testAlternative, st
 import { directionTexture, limitTexture, stopTexture, yieldTexture, crossingTexture, radarTexture } from './signs.js';
 import { RoadData } from './roaddata.js';
 import { Link } from './link.js';
+import { parseShared, googleMapsNav, wazeLink, sharePlace } from './sharedplaces.js';
 import { VoiceGuide } from './voice.js';
 
 // ------------------------------------------------------------------ constants (same road model as the Android app)
@@ -233,29 +234,19 @@ function buildTesla(gltf) {
   carInner.updateMatrixWorld(true);
   const box = new THREE.Box3().setFromObject(model);
 
-  // wheel pairs ("wheels" = front pair, "wheels001" = rear pair): spin about the lateral axis through their centre
-  model.traverse((o) => {
-    if (/^wheels(001)?$/.test(o.name)) {
-      const b = new THREE.Box3().setFromObject(o);
-      const centre = b.getCenter(new THREE.Vector3());
-      const pivot = new THREE.Group();
-      carRoot.add(pivot);
-      pivot.position.copy(centre);                 // world == carRoot space here (carRoot is at the origin)
-      pivot.updateMatrixWorld(true);
-      pivot.attach(o);
-      wheelPairs.push(pivot);
-    }
-  });
-
-  // doors: hinge at the front edge of each door, swing about the vertical axis
-  model.traverse((o) => {
-    if (!/^door_(lf|lr|rf|rr)$/.test(o.name)) return;
+  // wheel pairs ("wheels" = front pair, "wheels001" = rear pair) and doors: collect first, then re-parent (changing the tree while traversing it skips nodes)
+  const wheelNodes = [], doorNodes = [];
+  model.traverse((o) => { if (/^wheels(001)?$/.test(o.name)) wheelNodes.push(o); else if (/^door_(lf|lr|rf|rr)$/.test(o.name)) doorNodes.push(o); });
+  for (const o of wheelNodes) {          // spin about the lateral axis through their centre
+    const centre = new THREE.Box3().setFromObject(o).getCenter(new THREE.Vector3());
+    const pivot = new THREE.Group(); carRoot.add(pivot);
+    pivot.position.copy(centre); pivot.updateMatrixWorld(true); pivot.attach(o); wheelPairs.push(pivot);
+  }
+  for (const o of doorNodes) {           // hinge at the front edge of each door, swing about the vertical axis
     const b = new THREE.Box3().setFromObject(o), c = b.getCenter(new THREE.Vector3());
-    const pivot = new THREE.Group();
-    carRoot.add(pivot); pivot.position.set(c.x, c.y, b.min.z); pivot.updateMatrixWorld(true);
-    pivot.attach(o);
+    const pivot = new THREE.Group(); carRoot.add(pivot); pivot.position.set(c.x, c.y, b.min.z); pivot.updateMatrixWorld(true); pivot.attach(o);
     doorPivots.push({ pivot, sign: c.x >= 0 ? 1 : -1 });
-  });
+  }
 
   // headlight beams
   const len = box.max.z - box.min.z;
@@ -274,9 +265,8 @@ const loader = new GLTFLoader().setMeshoptDecoder(MeshoptDecoder);
 // Selectable main cars. Tesla (the original) has wheels that spin, doors that open and lamps by name; the others are placed generically.
 // len = real length in metres, rot = extra yaw (deg) so the front points down the road.
 const CARS = [
-  { id: 'tesla', name: 'Tesla Model 3', file: 'assets/tesla_model3.glb' },
+  { id: 'tesla', name: 'Tesla Model 3 (original)', file: 'assets/tesla_model3.glb' },
   { id: 'modelo3', name: 'Model 3 (ligero)', file: 'assets/cars/modelo3.glb', len: 4.69, rot: 180, body: /^car_paint$/i },
-  { id: 'm3b', name: 'Model 3 (detallado)', file: 'assets/cars/tesla_m3_b.glb', len: 4.69, rot: 180, body: /^carpaint$/i },
   { id: 'modely', name: 'Tesla Model Y', file: 'assets/cars/tesla_model_y.glb', len: 4.75, rot: 180, body: /^Material_2125767099$/ },
   { id: 'opel', name: 'Opel GT', file: 'assets/cars/opel_gt.glb', len: 4.1, rot: 180, body: /^bodyMAT$/ },
   { id: 'c130', name: 'Datsun 240Z (130)', file: 'assets/cars/car130.glb', len: 4.2, rot: 180, body: /^body[12]?$/ },
@@ -449,8 +439,8 @@ function updateTraffic(dt, v, d0, th0) {
 {
   const sel = $('carSel');
   for (const c of CARS) { const o = document.createElement('option'); o.value = c.id; o.textContent = c.name; sel.appendChild(o); }
-  let saved = 'tesla'; try { saved = localStorage.getItem('d3d.car') || 'tesla'; } catch (e) { /* private mode */ }
-  if (!CARS.some((c) => c.id === saved)) saved = 'tesla';
+  let saved = 'modelo3'; try { saved = localStorage.getItem('d3d.car') || 'modelo3'; } catch (e) { /* private mode */ }
+  if (!CARS.some((c) => c.id === saved)) saved = 'modelo3';
   sel.value = saved;
   sel.onchange = () => { try { localStorage.setItem('d3d.car', sel.value); } catch (e) { /* ignore */ } loadCar(sel.value); };
   window.addEventListener('DOMContentLoaded', () => {});
@@ -768,7 +758,7 @@ async function reroute() {
 function setRoute(r, dest, demo, alts = []) {
   course = r; rt.dest = dest; rt.demo = !!demo; rt.lastS = 0; rt.off = 0; rt.offCount = 0; s0 = 0; odo0 = st.odo; rt.drawnS = -1e9;
   rt.alts = alts; voice.reset();
-  $('bCancel').hidden = false; $('maneuver').hidden = false;
+  $('bCancel').hidden = false; $('maneuver').hidden = false; $('bShare').hidden = !dest;
   // route from a free service: colour it with TomTom's traffic flow if the key allows it
   if (!demo && ttKey && r.travelSec === 0) {
     r.viaFlow = true;
@@ -778,7 +768,7 @@ function setRoute(r, dest, demo, alts = []) {
 /** Stop the selected route and go back to free driving (procedural road, no manoeuvres). */
 function clearRoute() {
   course = null; rt.dest = null; rt.demo = false; rt.rerouting = false; rt.drawnS = -1e9; rt.alts = []; rt.traffic = null; voice.reset(); $('trafficCard').hidden = true;
-  $('bCancel').hidden = true; $('maneuver').hidden = true; $('tripbar').hidden = true;
+  $('bCancel').hidden = true; $('maneuver').hidden = true; $('tripbar').hidden = true; $('bShare').hidden = true;
   drawRoute(0);
   if (st.pos) { rt.mapLat = st.pos.lat; rt.mapLon = st.pos.lon; rt.mapBrg = st.pos.heading || 0; rt.mapValid = true; } else rt.mapValid = false;
   say('Ruta cancelada');
@@ -905,6 +895,8 @@ function renderResults() {
     const row = document.createElement('div'); row.className = 'it';
     row.innerHTML = '<span>' + icon + '</span><span class="n"></span>';
     row.querySelector('.n').textContent = p.name;
+    const shb = document.createElement('button'); shb.textContent = '↗'; shb.style.color = '#7ce0ff'; shb.onclick = (e) => { e.stopPropagation(); closeSearch(); shareDialog(p); }; row.appendChild(shb);
+    if (isFav(p)) { const eb = document.createElement('button'); eb.textContent = '✏️'; eb.onclick = (e) => { e.stopPropagation(); editFav(p); }; row.appendChild(eb); }
     if (isFav(p)) { const hb = document.createElement('button'); hb.textContent = home && samePlace(home, p) ? '🏠' : '🏡'; hb.onclick = (e) => { e.stopPropagation(); setHome(p); renderResults(); }; row.appendChild(hb); }
     const sb = document.createElement('button'); sb.textContent = isFav(p) ? '★' : '☆'; sb.onclick = (e) => { e.stopPropagation(); toggleFav(p); renderResults(); }; row.appendChild(sb);
     row.onclick = () => { closeSearch(); Link.publish(p); startRoute(p); };
@@ -916,8 +908,55 @@ $('q').addEventListener('input', () => {
   clearTimeout(liveTimer); live = []; renderResults();
   const text = $('q').value.trim();
   if (text.length < 3) return;
+  const sp = parseShared(text);                     // a pasted Google Maps link or "lat, lon" is a result by itself
+  if (sp.lat !== undefined) { live = [{ name: sp.name || sp.lat.toFixed(5) + ', ' + sp.lon.toFixed(5), lat: sp.lat, lon: sp.lon }]; liveFor = text.toLowerCase(); renderResults(); return; }
   liveTimer = setTimeout(async () => { const res = await search(text, origin(), ttKey); if ($('q').value.trim() === text) { live = res; liveFor = text.toLowerCase(); renderResults(); } }, 350);
 });
+// --- places that arrive from / go to other apps (Google Maps share, Tesla app, Waze)
+function placeDialog({ title, place, buttons, editable = true }) {
+  const box = $('placeDialog'), nameEl = $('pdName');
+  $('pdTitle').textContent = title; nameEl.value = place.name; nameEl.parentElement.hidden = !editable;
+  $('pdCoords').textContent = place.lat.toFixed(5) + ', ' + place.lon.toFixed(5);
+  const holder = $('pdBtns'); holder.innerHTML = '';
+  for (const [label, fn] of buttons) {
+    const b = document.createElement('button'); b.textContent = label;
+    b.onclick = () => { const np = { name: nameEl.value.trim() || place.name, lat: place.lat, lon: place.lon }; box.hidden = true; fn(np); };
+    holder.appendChild(b);
+  }
+  box.hidden = false;
+}
+$('pdX').onclick = () => { $('placeDialog').hidden = true; };
+function sharedDialog(p) {
+  placeDialog({ title: 'Ubicación compartida', place: p, buttons: [
+    ['Ir ahora', (np) => { addRecent(np); Link.publish(np); startRoute(np); }],
+    ['⭐ Guardar en favoritos', (np) => { if (!isFav(np)) { favs.unshift({ name: np.name, lat: np.lat, lon: np.lon }); store.set('favs', favs); } say('Guardado en favoritos'); }],
+  ] });
+}
+function shareDialog(p) {
+  placeDialog({ title: 'Enviar destino', place: p, editable: false, buttons: [
+    ['Compartir… (app de Tesla, WhatsApp…)', async (np) => { const m = await sharePlace(np); if (m) say(m); }],
+    ['Abrir en Google Maps', (np) => window.open(googleMapsNav(np), '_blank')],
+    ['Abrir en Waze', (np) => window.open(wazeLink(np), '_blank')],
+  ] });
+}
+function editFav(p) {
+  const n = prompt('Nombre del favorito', p.name);
+  if (!n || !n.trim()) return;
+  for (const list of [favs, recents]) for (const f of list) if (samePlace(f, p)) f.name = n.trim();
+  if (home && samePlace(home, p)) { home.name = n.trim(); store.set('home', home); }
+  store.set('favs', favs); store.set('recents', recents); renderResults();
+}
+async function receiveShared(raw) {
+  const info = parseShared(raw); let p = null;
+  if (info.lat !== undefined) p = { name: info.name || info.lat.toFixed(5) + ', ' + info.lon.toFixed(5), lat: info.lat, lon: info.lon };
+  else if (info.name) { say('Buscando «' + info.name + '»…'); try { p = (await search(info.name, origin(), ttKey))[0] || null; } catch (e) { p = null; } }
+  if (p) sharedDialog(p); else say('No pude leer la ubicación compartida');
+}
+$('bShare').onclick = () => { $('settings').hidden = true; if (rt.dest) shareDialog(rt.dest); };
+{ // opened from the Android share sheet: ?title=..&text=..&url=..
+  const qs = new URLSearchParams(location.search), shared = [qs.get('title'), qs.get('text'), qs.get('url')].filter(Boolean).join('\n');
+  if (shared) { try { history.replaceState(null, '', location.pathname); } catch (e) { /* ignore */ } setTimeout(() => receiveShared(shared), 1500); }
+}
 function openSearch() { $('searchbar').hidden = false; $('hint').className = ''; $('hint').textContent = '↓ Arrastra hacia abajo para ir a casa' + (home ? '' : ' (marca 🏠 en un favorito)'); $('q').value = ''; live = []; renderResults(); setTimeout(() => $('q').focus(), 50); }
 function closeSearch() { $('searchbar').hidden = true; $('q').blur(); }
 $('bSearch').onclick = openSearch;

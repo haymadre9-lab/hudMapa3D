@@ -133,3 +133,14 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #000; color:
 
 #limit.approx::after { content: "~"; position: absolute; top: -9px; right: -4px; font-size: 20px; color: #fff; text-shadow: 0 0 3px #000; }
 #limit { position: fixed; }
+
+#placeDialog { position: fixed; inset: 0; background: rgba(0,0,0,.6); display: flex; align-items: center; justify-content: center; z-index: 21; }
+#placeDialog[hidden] { display: none; }
+#placeDialog .card { position: relative; background: #10182c; padding: 18px; border-radius: 14px; width: min(420px, 92vw); font-size: 14px; line-height: 1.5; }
+#placeDialog h2 { margin: 0 0 8px; font-size: 18px; padding-right: 40px; }
+#placeDialog label { display: block; }
+#placeDialog input { width: 100%; margin-top: 6px; padding: 10px; border-radius: 8px; border: 0; background: #2b2d33; color: #fff; font-size: 16px; }
+#placeDialog .small { font-size: 12px; opacity: .7; margin: 6px 0; }
+#placeDialog #pdX { position: absolute; top: 10px; right: 10px; width: 34px; height: 34px; padding: 0; border-radius: 50%; border: 0; background: #2b2d33; color: #fff; font-size: 16px; }
+#pdBtns { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
+#pdBtns button { padding: 11px 14px; border: 0; border-radius: 10px; background: #4fc3f7; color: #04202e; font-weight: 600; font-size: 14px; text-align: left; cursor: pointer; }
