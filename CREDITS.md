@@ -14,6 +14,10 @@ Cambios hechos por este proyecto: escalado y recentrado de los modelos; el coche
 | `cars/tesla_model3_b.glb` | Tesla M3 model | wintrez | https://sketchfab.com/3d-models/tesla-m3-model-3a602469d7874d1397efa67182198705 |
 | `cars/porsche_911_carrera_4s.glb` | (FREE) Porsche 911 Carrera 4S | Karol Miklas (**CC BY-SA 4.0**: las copias modificadas se comparten con la misma licencia) | https://sketchfab.com/3d-models/free-porsche-911-carrera-4s-d01b254483794de3819786d93e0e1ebf |
 | `cars/opel_gt.glb` | Opel GT Retopo | systmh (**CC BY-NC-SA 4.0**: solo uso no comercial, y compartir igual) | https://sketchfab.com/3d-models/opel-gt-retopo-badcab3c8a3d42359c8416db8a7427fe |
+| `cars/mercedes_e_class.glb` | Mercedes E Class W212 | Peter_D (CC BY 4.0) | https://sketchfab.com/3d-models/mercedes-e-class-w212-119c5e10733142b197aa53b86f6aeb04 |
+| `cars/ford_mustang_1965.glb` | Ford Mustang 1965 | Pooya_dh (**CC BY-NC 4.0**) | https://sketchfab.com/3d-models/ford-mustang-1965-5f4e3965f79540a9888b5d05acea5943 |
+| `cars/xiaomi_su7.glb` | 2024 Xiaomi SU7 Max | Ddiaz Design (**CC BY-NC-SA 4.0**) | https://sketchfab.com/3d-models/2024-xiaomi-su7-max-db30dd1e254243b4ba002c6ce65df052 |
+| `cars/opel_gt_turbo_2008.glb` | 2008 Opel GT 2.0 Turbo | SIU Car Garage (**CC BY-NC 4.0**) | https://sketchfab.com/3d-models/2008-opel-gt-20-turbo-cd72649048d84df39267083bb83dbda4 |
 | `traffic/*.glb` (compact, coupe, hatchback, minivan, offroad, pickup, sedan, sport, suv, wagon) | Generic passenger car pack (CC BY 4.0) | Comrade1280 | https://sketchfab.com/3d-models/generic-passenger-car-pack-20f9af9b8a404d5cb022ac6fe87f21f5 |
 | `scene/buildings/edificio_3.glb` | Edificio 3 | Elbolillo | https://sketchfab.com/3d-models/edificio-3-089d8e3e06fc4d27b9871abe3afc96fa |
 | `scene/buildings/edificio_5.glb` | Edificio 5 | Elbolillo | https://sketchfab.com/3d-models/edificio-5-3aa4895820e648e9b05d7630e3b787ae |

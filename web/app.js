@@ -185,8 +185,8 @@ const doorPivots = [];
 function classifyMaterial(m) {
   const n = (m.name || '').toLowerCase();
   if (/^primary/.test(n)) bodyMats.push(m);
-  if (/left.{0,6}rear.?light/.test(n)) lampMats.tailL.push(m);          // the visible rear clusters double as turn signals
-  else if (/right.{0,6}rear.?light/.test(n)) lampMats.tailR.push(m);
+  if (/left.{0,6}rear.?light/.test(n)) { m.userData.keepMap = true; lampMats.tailL.push(m); }          // the visible rear clusters double as turn signals
+  else if (/right.{0,6}rear.?light/.test(n)) { m.userData.keepMap = true; lampMats.tailR.push(m); }
   else if (/indicator/.test(n)) (/_l/.test(n) ? lampMats.sigL : lampMats.sigR).push(m);
   else if (/brea?k/.test(n)) lampMats.brake.push(m);
   else if (/rear.?light|tembus.?red|satin.?red/.test(n)) lampMats.tail.push(m);
@@ -275,11 +275,13 @@ const loader = new GLTFLoader().setMeshoptDecoder(MeshoptDecoder);
 // len = real length in metres, rot = extra yaw (deg) so the front points down the road.
 const CARS = [
   { id: 'tesla', name: 'Tesla Model 3', file: 'assets/tesla_model3.glb' },
-  { id: 'modelo3', name: 'Model 3 (ligero)', file: 'assets/cars/modelo3.glb', len: 4.69, rot: 180 },
-  { id: 'm3b', name: 'Model 3 (detallado)', file: 'assets/cars/tesla_m3_b.glb', len: 4.69, rot: 180 },
-  { id: 'modely', name: 'Tesla Model Y', file: 'assets/cars/tesla_model_y.glb', len: 4.75, rot: 180 },
-  { id: 'opel', name: 'Opel GT', file: 'assets/cars/opel_gt.glb', len: 4.1, rot: 180 },
-  { id: 'c130', name: 'Datsun 240Z (130)', file: 'assets/cars/car130.glb', len: 4.2, rot: 180 },
+  { id: 'modelo3', name: 'Model 3 (ligero)', file: 'assets/cars/modelo3.glb', len: 4.69, rot: 180, body: /^car_paint$/i },
+  { id: 'm3b', name: 'Model 3 (detallado)', file: 'assets/cars/tesla_m3_b.glb', len: 4.69, rot: 180, body: /^carpaint$/i },
+  { id: 'modely', name: 'Tesla Model Y', file: 'assets/cars/tesla_model_y.glb', len: 4.75, rot: 180, body: /^Material_2125767099$/ },
+  { id: 'opel', name: 'Opel GT', file: 'assets/cars/opel_gt.glb', len: 4.1, rot: 180, body: /^bodyMAT$/ },
+  { id: 'c130', name: 'Datsun 240Z (130)', file: 'assets/cars/car130.glb', len: 4.2, rot: 180, body: /^body[12]?$/ },
+  { id: 'mercedes', name: 'Mercedes Clase E (W212)', file: 'assets/cars/mercedes_e_class.glb', len: 4.87, rot: 0, body: /^mat_body$/ },
+  { id: 'su7', name: 'Xiaomi SU7', file: 'assets/cars/xiaomi_su7.glb', len: 5.0, rot: 180, body: /CarPaint_SU7_Base1$/ },
 ];
 let carToken = 0;
 
@@ -334,22 +336,36 @@ function buildGeneric(gltf, cfg) {
       area.set(m, (area.get(m) || 0) + n);
     }
   });
+  if (cfg.body) for (const m of area.keys()) if (cfg.body.test(m.name || '')) bodyMats.push(m);
   let best = null;
-  for (const [m, n] of area) {
+  for (const [m, n] of cfg.body ? [] : area) {
     const nm = (m.name || '').toLowerCase();
     if (m.transparent || /glass|window|tire|tyre|rubber|wheel|rim|chrome|interior|black|plate|light|lens|mirror|seat|dark|license/.test(nm)) continue;
     if (/car.?paint|body|paint|primary|coat/.test(nm)) { bodyMats.push(m); best = null; }
     else if (!bodyMats.length && (!best || n > area.get(best))) best = m;
   }
   if (!bodyMats.length && best) bodyMats.push(best);
+  // wheels and doors that come as named nodes (WheelFL, DoorFL...): spin / swing them like the original Model 3
+  model.updateMatrixWorld(true); carInner.updateMatrixWorld(true);
+  const wheelNodes = [], doorNodes = [];
+  model.traverse((o) => { if (/^wheel(f|r)[lr]$/i.test(o.name)) wheelNodes.push(o); else if (/^door(f|r)[lr]$/i.test(o.name)) doorNodes.push(o); });
+  for (const o of wheelNodes) {
+    const b = new THREE.Box3().setFromObject(o), centre = b.getCenter(new THREE.Vector3());
+    const pivot = new THREE.Group(); carRoot.add(pivot); pivot.position.copy(centre); pivot.updateMatrixWorld(true); pivot.attach(o); wheelPairs.push(pivot);
+  }
+  for (const o of doorNodes) {
+    const b = new THREE.Box3().setFromObject(o), c2 = b.getCenter(new THREE.Vector3());
+    const pivot = new THREE.Group(); carRoot.add(pivot); pivot.position.set(c2.x, c2.y, b.min.z); pivot.updateMatrixWorld(true); pivot.attach(o);
+    doorPivots.push({ pivot, sign: c2.x >= 0 ? 1 : -1 });
+  }
   addHeadSpots(cfg.len);
   carReady = true;
 }
 function classifyGeneric(m) {
   const n = (m.name || '').toLowerCase();
   if (/indicator|blinker|orange/.test(n)) lampMats.sigL.push(m);
-  else if (/brea?k(e)?[_ ]?light|brake/.test(n)) lampMats.brake.push(m);
-  else if (/rear.?light|tail|back.?light|red.?light|back_red|red_plastic/.test(n)) lampMats.tail.push(m);
+  else if (/brea?k(e)?[_ ]?light|brake/.test(n) && !/caliper|disc|disk|rotor|pad|brakes|hub|tire|tyre/.test(n)) lampMats.brake.push(m);
+  else if (/rear.?light|(^|[^a-z])tail|back.?light|red.?light|back_red|red_plastic/.test(n)) lampMats.tail.push(m);
   else if (/front.{0,6}light|head.?light|led.?phare|fog/.test(n)) lampMats.head.push(m);
 }
 
@@ -449,11 +465,19 @@ const st = {
   cam: { yaw: 0, pitch: 11, dist: 6.8 }, lastTouch: 0,
 };
 
+/** Rear cluster of one side: amber while its turn signal is lit (base colour + emission, like the Android app), red tail light otherwise. */
+function sideLamp(mats, sig, tailOn) {
+  for (const m of mats) {
+    if (m.userData.c0 === undefined) m.userData.c0 = m.color.getHex();
+    if (sig) { m.color.setHex(0xff8c00); m.emissive.setHex(0xff8c00); m.emissiveIntensity = 8; }
+    else { m.color.setHex(m.userData.c0); m.emissive.setHex(0xff1010); m.emissiveIntensity = tailOn ? 4 : 0; }
+  }
+}
 function setLamps(mats, on, color, intensity) {
   for (const m of mats) {
     m.emissive.setHex(color);
     m.emissiveIntensity = on ? intensity : 0;
-    if (color === 0xff1010 && m.emissiveMap) { m.emissiveMap = null; m.needsUpdate = true; } // the baked emissive texture is nearly black: use a flat red glow instead
+    if (color === 0xff1010 && m.emissiveMap && !m.userData.keepMap) { m.emissiveMap = null; m.needsUpdate = true; } // the baked emissive texture is nearly black: use a flat red glow instead
   }
 }
 
@@ -685,8 +709,8 @@ function frame(now) {
     setLamps(lampMats.tail, st.headlights || braking, 0xff1010, 2.4);
     setLamps(lampMats.brake, braking, 0xff1010, 6);
     const tailOn = st.headlights || braking, sigLon = (st.hazard || autoHaz || autoL) && blink, sigRon = (st.hazard || autoHaz || autoR) && blink;
-    if (sigLon) setLamps(lampMats.tailL, true, 0xff8c00, 6); else setLamps(lampMats.tailL, tailOn, 0xff1010, 2.4);
-    if (sigRon) setLamps(lampMats.tailR, true, 0xff8c00, 6); else setLamps(lampMats.tailR, tailOn, 0xff1010, 2.4);
+    sideLamp(lampMats.tailL, sigLon, tailOn);
+    sideLamp(lampMats.tailR, sigRon, tailOn);
     setLamps(lampMats.sigL, sigLon, 0xff8c00, 4);
     setLamps(lampMats.sigR, sigRon, 0xff8c00, 4);
     for (const sp of headSpots) sp.intensity = st.headlights ? (night ? 250 : 60) : 0;
