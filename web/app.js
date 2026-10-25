@@ -181,6 +181,7 @@ const lampMats = { head: [], tail: [], brake: [], sigL: [], sigR: [], tailL: [],
 const bodyMats = [];
 const headSpots = [];
 let carReady = false;
+let stripRig = null;           // thin light strips drawn on the original Model 3's lamp clusters
 const doorPivots = [];
 
 function classifyMaterial(m) {
@@ -248,6 +249,30 @@ function buildTesla(gltf) {
     doorPivots.push({ pivot, sign: c.x >= 0 ? 1 : -1 });
   }
 
+  // Lights of the original Model 3: its lamp materials share one texture atlas and the clusters are solid blocks, so lighting the material lights
+  // the whole housing. Instead draw thin glowing strips on the clusters: red at the back (amber while that side's signal blinks), white at the front.
+  {
+    model.updateMatrixWorld(true);
+    const found = {};
+    model.traverse((o) => {
+      if (!o.isMesh || !o.material) return;
+      const n = o.material.name;
+      if (n === 'left_rear_light' || n === 'right_rear_light' || n === 'left_front_light' || n === 'right_front_light') found[n] = new THREE.Box3().setFromObject(o);
+    });
+    const rig = { rear: {}, front: [] };
+    const strip = (box, rear) => {
+      const sz = box.getSize(new THREE.Vector3()), c = box.getCenter(new THREE.Vector3());
+      const m = new THREE.Mesh(new THREE.BoxGeometry(sz.x * 0.85, Math.max(0.012, sz.y * 0.13), 0.012), new THREE.MeshBasicMaterial({ color: 0xff2a1a, toneMapped: false }));
+      m.position.set(c.x, rear ? box.max.y - sz.y * 0.3 : c.y - sz.y * 0.05, rear ? box.max.z + 0.004 : box.min.z - 0.12);
+      m.visible = false; carRoot.add(m); return m;
+    };
+    if (found.left_rear_light) rig.rear.left = strip(found.left_rear_light, true);
+    if (found.right_rear_light) rig.rear.right = strip(found.right_rear_light, true);
+    for (const n of ['left_front_light', 'right_front_light']) if (found[n]) rig.front.push(strip(found[n], false));
+    for (const m of rig.front) m.material.color.setRGB(1, 0.97, 0.85);
+    if (rig.rear.left || rig.rear.right) stripRig = rig;
+  }
+
   // headlight beams
   const len = box.max.z - box.min.z;
   for (const sx of [-0.7, 0.7]) {
@@ -278,7 +303,7 @@ let carToken = 0;
 function clearCar() {
   carReady = false;
   carRoot.clear(); carInner.clear(); carRoot.add(carInner); carInner.scale.setScalar(1); carInner.position.set(0, 0, 0);
-  wheelPairs.length = 0; doorPivots.length = 0; bodyMats.length = 0; headSpots.length = 0;
+  stripRig = null; wheelPairs.length = 0; doorPivots.length = 0; bodyMats.length = 0; headSpots.length = 0;
   for (const k of Object.keys(lampMats)) lampMats[k].length = 0;
   origColors.clear();
 }
@@ -466,7 +491,7 @@ function lamp(mats, level, rgb, k) {
   }
 }
 /** Rear cluster of one side: amber while its turn signal is lit, red tail light otherwise. */
-function sideLamp(mats, sig, tailOn) { if (sig) lamp(mats, 1, AMBER, 4); else lamp(mats, tailOn ? 1 : 0, RED, 2.2); }
+function sideLamp(mats, sig, tailOn) { if (sig) lamp(mats, 1, AMBER, 6); else lamp(mats, tailOn ? 1 : 0, RED, 4); }
 
 // ------------------------------------------------------------------ input: camera, buttons, GPS
 const pointers = new Map();
@@ -692,14 +717,21 @@ function frame(now) {
     if (st.speedKmh > 30 && st.decel > 25) st.hazUntil = now + 4000;
     autoHaz = now < (st.hazUntil || 0) || (!!course && rt.traffic && rt.traffic.level === 3 && rt.traffic.dist <= 30 && st.speedKmh < 25);
     const blink = Math.floor(now / 625) % 2 === 0;
-    lamp(lampMats.head, st.headlights ? 1 : 0, WHITE, 3);
-    lamp(lampMats.tail, (st.headlights || braking) ? 1 : 0, RED, 2.2);
-    lamp(lampMats.brake, braking ? 1.5 : (st.headlights ? 0.5 : 0), RED, 1.4);
+    if (!stripRig) lamp(lampMats.head, st.headlights ? 1 : 0, WHITE, 6);
+    if (!stripRig) lamp(lampMats.tail, (st.headlights || braking) ? 1 : 0, RED, 4);
+    if (!stripRig) lamp(lampMats.brake, braking ? 1.5 : (st.headlights ? 0.5 : 0), RED, 4);
     const tailOn = st.headlights || braking, sigLon = (st.hazard || autoHaz || autoL) && blink, sigRon = (st.hazard || autoHaz || autoR) && blink;
-    sideLamp(lampMats.tailL, sigLon, tailOn);
-    sideLamp(lampMats.tailR, sigRon, tailOn);
-    lamp(lampMats.sigL, sigLon ? 1 : 0, AMBER, 4);
-    lamp(lampMats.sigR, sigRon ? 1 : 0, AMBER, 4);
+    if (stripRig) {
+      for (const [side, on] of [['left', sigLon], ['right', sigRon]]) {
+        const m = stripRig.rear[side]; if (!m) continue;
+        const active = side === 'left' ? (st.hazard || autoHaz || autoL) : (st.hazard || autoHaz || autoR);
+        if (active) { m.visible = on; m.material.color.setRGB(1, 0.6, 0.05); }
+        else { m.visible = tailOn; m.material.color.setRGB(1, braking ? 0.15 : 0.1, 0.06); }
+      }
+      for (const m of stripRig.front) m.visible = st.headlights;
+    } else { sideLamp(lampMats.tailL, sigLon, tailOn); sideLamp(lampMats.tailR, sigRon, tailOn); }
+    if (!stripRig) lamp(lampMats.sigL, sigLon ? 1 : 0, AMBER, 4);
+    if (!stripRig) lamp(lampMats.sigR, sigRon ? 1 : 0, AMBER, 4);
     for (const sp of headSpots) sp.intensity = st.headlights ? (night ? 250 : 60) : 0;
   }
 
