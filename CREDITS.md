@@ -6,13 +6,16 @@ que obliga a **citar al autor** e **indicar si se han hecho cambios**.
 Los datos (autor, licencia, enlace) están leídos de los metadatos que traen los propios archivos `.glb`.
 
 Cambios hechos por este proyecto: escalado y recentrado de los modelos; el coche se puede repintar en la app
-(se cambia el color base del material de la carrocería); sin cambios en la geometría.
+(se cambia el color base del material de la carrocería); los modelos de coche añadidos después (Model 3 alternativo, Porsche, Opel) están además **simplificados** (menos triángulos) y con texturas reducidas a 1024 px (512 px el Porsche 930) para que quepan en el móvil.
 
 | Archivo | Modelo | Autor | Enlace |
 |---|---|---|---|
 | `cars/tesla_model3.glb` | Tesla 2018 Model 3 | Ameer Studio | https://sketchfab.com/3d-models/tesla-2018-model-3-5ef9b845aaf44203b6d04e2c677e444f |
-| `traffic/tesla_cybertruck.glb` | Tesla Cybertruck | Lexyc16 | https://sketchfab.com/3d-models/tesla-cybertruck-f12e67159f75486bb21213e573520612 |
-| `traffic/tesla_semi.glb` | Tesla Semi | Aleksei Rozumnyi | https://sketchfab.com/3d-models/tesla-semi-39ffc7c746184e0c9ebd5bbcd0b405dd |
+| `cars/tesla_model3_b.glb` | Tesla M3 model | wintrez | https://sketchfab.com/3d-models/tesla-m3-model-3a602469d7874d1397efa67182198705 |
+| `cars/porsche_911_turbo_1975.glb` | FREE 1975 Porsche 911 (930) Turbo | Lionsharp Studios (CC BY 4.0) | https://sketchfab.com/3d-models/free-1975-porsche-911-930-turbo-8568d9d14a994b9cae59499f0dbed21e |
+| `cars/porsche_911_carrera_4s.glb` | (FREE) Porsche 911 Carrera 4S | Karol Miklas (**CC BY-SA 4.0**: las copias modificadas se comparten con la misma licencia) | https://sketchfab.com/3d-models/free-porsche-911-carrera-4s-d01b254483794de3819786d93e0e1ebf |
+| `cars/opel_gt.glb` | Opel GT Retopo | systmh (**CC BY-NC-SA 4.0**: solo uso no comercial, y compartir igual) | https://sketchfab.com/3d-models/opel-gt-retopo-badcab3c8a3d42359c8416db8a7427fe |
+| `traffic/*.glb` (compact, coupe, hatchback, minivan, offroad, pickup, sedan, sport, suv, wagon) | Generic passenger car pack (CC BY 4.0) | Comrade1280 | https://sketchfab.com/3d-models/generic-passenger-car-pack-20f9af9b8a404d5cb022ac6fe87f21f5 |
 | `scene/buildings/edificio_3.glb` | Edificio 3 | Elbolillo | https://sketchfab.com/3d-models/edificio-3-089d8e3e06fc4d27b9871abe3afc96fa |
 | `scene/buildings/edificio_5.glb` | Edificio 5 | Elbolillo | https://sketchfab.com/3d-models/edificio-5-3aa4895820e648e9b05d7630e3b787ae |
 | `scene/buildings/edificio_brick.glb` | Edificio Brick | 3D JavierV | https://sketchfab.com/3d-models/edificio-brick-5c62728aa48c4f9b9a4051b304b040e9 |
@@ -27,7 +30,7 @@ El modelo `web/assets/tesla_model3.glb` es el Tesla 2018 Model 3 de Ameer Studio
 Los edificios de `web/assets/` (Edificio 3, Edificio 5, Edificio Brick y Edificio Corficolombiana) son los mismos modelos de la tabla de arriba, comprimidos con meshopt y texturas WebP.
 
 ## Marcas
-Tesla, Model 3, Cybertruck y Semi son marcas de Tesla, Inc. Este proyecto no está afiliado a Tesla ni a ninguna marca de automoción;
+Tesla y Model 3 son marcas de Tesla, Inc. Este proyecto no está afiliado a Tesla ni a ninguna marca de automoción;
 los modelos se usan solo como contenido de demostración.
 
 ## Datos
@@ -43,3 +46,14 @@ los modelos se usan solo como contenido de demostración.
 - [Filament](https://github.com/google/filament) y [SceneView](https://github.com/SceneView/sceneview-android) — Apache 2.0.
 - [MapLibre Native](https://github.com/maplibre/maplibre-native) — BSD 2-Clause.
 - Jetpack Compose y AndroidX — Apache 2.0.
+
+## Modelos añadidos a la web (comprimidos con meshopt y WebP; los de la tabla anterior que se repiten aquí son los mismos autores)
+
+| Archivo (web/assets) | Modelo | Autor y licencia | Enlace |
+|---|---|---|---|
+| `cars/modelo3.glb` | Tesla Model 3 | David_Holiday (CC BY 4.0) | https://sketchfab.com/3d-models/tesla-model-3-123c10f376ec4f18b93c73afc382808b |
+| `cars/tesla_m3_b.glb` | Tesla M3 model | wintrez (CC BY 4.0) | https://sketchfab.com/3d-models/tesla-m3-model-3a602469d7874d1397efa67182198705 |
+| `cars/tesla_model_y.glb` | 2025 Tesla Model Y | BloxBloger (**CC BY-NC 4.0**: solo uso no comercial) | https://sketchfab.com/3d-models/2025-tesla-model-y-619601e7800d418da5922c4fa7833f74 |
+| `cars/opel_gt.glb` | Opel GT Retopo | systmh (**CC BY-NC-SA 4.0**) | https://sketchfab.com/3d-models/opel-gt-retopo-badcab3c8a3d42359c8416db8a7427fe |
+| `cars/car130.glb` | 130 | ｍononofu (CC BY 4.0) | https://sketchfab.com/3d-models/130-d9485f5360224e9dbaafd24b2eec0f1a |
+| `traffic/*.glb` | Generic passenger car pack | Comrade1280 (CC BY 4.0) | https://sketchfab.com/3d-models/generic-passenger-car-pack-20f9af9b8a404d5cb022ac6fe87f21f5 |

@@ -190,8 +190,7 @@ function classifyMaterial(m) {
   else if (/(front.{0,6}light|fog)/.test(n)) lampMats.head.push(m);
 }
 
-const loader = new GLTFLoader().setMeshoptDecoder(MeshoptDecoder);
-loader.load('assets/tesla_model3.glb', (gltf) => {
+function buildTesla(gltf) {
   const model = gltf.scene;
   // drop the ground-reflection / fake shadow planes baked into the model
   const junk = [];
@@ -261,9 +260,104 @@ loader.load('assets/tesla_model3.glb', (gltf) => {
     headSpots.push(sp);
   }
   carReady = true;
-  $('loading').classList.add('done');
-}, (e) => { if (e.total) $('loadmsg').textContent = 'Cargando el coche… ' + Math.min(100, Math.round(100 * e.loaded / e.total)) + '%'; },
-(err) => { $('loadmsg').textContent = 'No se pudo cargar el coche: ' + (err.message || err); });
+}
+
+const loader = new GLTFLoader().setMeshoptDecoder(MeshoptDecoder);
+
+// Selectable main cars. Tesla (the original) has wheels that spin, doors that open and lamps by name; the others are placed generically.
+// len = real length in metres, rot = extra yaw (deg) so the front points down the road.
+const CARS = [
+  { id: 'tesla', name: 'Tesla Model 3', file: 'assets/tesla_model3.glb' },
+  { id: 'modelo3', name: 'Model 3 (ligero)', file: 'assets/cars/modelo3.glb', len: 4.69, rot: 180 },
+  { id: 'm3b', name: 'Model 3 (detallado)', file: 'assets/cars/tesla_m3_b.glb', len: 4.69, rot: 180 },
+  { id: 'modely', name: 'Tesla Model Y', file: 'assets/cars/tesla_model_y.glb', len: 4.75, rot: 180 },
+  { id: 'opel', name: 'Opel GT', file: 'assets/cars/opel_gt.glb', len: 4.1, rot: 180 },
+  { id: 'c130', name: 'Datsun 240Z (130)', file: 'assets/cars/car130.glb', len: 4.2, rot: 180 },
+];
+let carToken = 0;
+
+function clearCar() {
+  carReady = false;
+  carRoot.clear(); carInner.clear(); carRoot.add(carInner); carInner.scale.setScalar(1); carInner.position.set(0, 0, 0);
+  wheelPairs.length = 0; doorPivots.length = 0; bodyMats.length = 0; headSpots.length = 0;
+  for (const k of Object.keys(lampMats)) lampMats[k].length = 0;
+  origColors.clear();
+}
+
+function addHeadSpots(len) {
+  for (const sx of [-0.7, 0.7]) {
+    const sp = new THREE.SpotLight(0xfff2cc, 0, 60, 0.45, 0.5, 1.5);
+    sp.position.set(sx, 0.7, -len / 2 + 0.2);
+    sp.target.position.set(sx * 0.9, 0.2, -len / 2 - 20);
+    carRoot.add(sp, sp.target);
+    headSpots.push(sp);
+  }
+}
+
+function buildGeneric(gltf, cfg) {
+  const model = gltf.scene;
+  const junk = [];
+  model.traverse((o) => {
+    if (!o.isMesh) return;
+    const names = [o.name].concat([].concat(o.material).map((m) => m.name || '')).join(' ').toLowerCase();
+    if (/pantulan|shadow|reflection|ground|floor/.test(names)) junk.push(o);
+  });
+  junk.forEach((o) => o.parent && o.parent.remove(o));
+  model.updateMatrixWorld(true);
+  // orient: long axis along z, then the model-specific yaw
+  let box = new THREE.Box3().setFromObject(model);
+  let sz = box.getSize(new THREE.Vector3());
+  const holder = new THREE.Group(); holder.add(model);
+  holder.rotation.y = (sz.x > sz.z ? Math.PI / 2 : 0) + (cfg.rot || 0) * Math.PI / 180;
+  holder.updateMatrixWorld(true);
+  box = new THREE.Box3().setFromObject(holder); sz = box.getSize(new THREE.Vector3());
+  const s = cfg.len / Math.max(sz.x, sz.z), c = box.getCenter(new THREE.Vector3());
+  carInner.add(holder);
+  carInner.scale.setScalar(s);
+  carInner.position.set(-c.x * s, -box.min.y * s, -c.z * s);
+  carInner.updateMatrixWorld(true);
+
+  // body paint = the biggest opaque material that is not glass / tyre / interior
+  const area = new Map();
+  model.traverse((o) => {
+    if (!o.isMesh) return;
+    const n = o.geometry.index ? o.geometry.index.count : o.geometry.attributes.position.count;
+    for (const m of [].concat(o.material)) {
+      classifyGeneric(m);
+      area.set(m, (area.get(m) || 0) + n);
+    }
+  });
+  let best = null;
+  for (const [m, n] of area) {
+    const nm = (m.name || '').toLowerCase();
+    if (m.transparent || /glass|window|tire|tyre|rubber|wheel|rim|chrome|interior|black|plate|light|lens|mirror|seat|dark|license/.test(nm)) continue;
+    if (/car.?paint|body|paint|primary|coat/.test(nm)) { bodyMats.push(m); best = null; }
+    else if (!bodyMats.length && (!best || n > area.get(best))) best = m;
+  }
+  if (!bodyMats.length && best) bodyMats.push(best);
+  addHeadSpots(cfg.len);
+  carReady = true;
+}
+function classifyGeneric(m) {
+  const n = (m.name || '').toLowerCase();
+  if (/indicator|blinker|orange/.test(n)) lampMats.sigL.push(m);
+  else if (/brea?k(e)?[_ ]?light|brake/.test(n)) lampMats.brake.push(m);
+  else if (/rear.?light|tail|back.?light|red.?light|back_red|red_plastic/.test(n)) lampMats.tail.push(m);
+  else if (/front.{0,6}light|head.?light|led.?phare|fog/.test(n)) lampMats.head.push(m);
+}
+
+function loadCar(id) {
+  const cfg = CARS.find((c) => c.id === id) || CARS[0];
+  const token = ++carToken;
+  clearCar();
+  loader.load(cfg.file, (gltf) => {
+    if (token !== carToken) return;
+    if (cfg.id === 'tesla') buildTesla(gltf); else buildGeneric(gltf, cfg);
+    $('loading').classList.add('done');
+  }, (e) => { if (e.total) $('loadmsg').textContent = 'Cargando el coche… ' + Math.min(100, Math.round(100 * e.loaded / e.total)) + '%'; },
+  (err) => { $('loadmsg').textContent = 'No se pudo cargar el coche: ' + (err.message || err); });
+}
+
 
 // paint chips
 const PAINTS = [['#eeeeee', null], ['#f5f5f5', 0xf2f2f2], ['#111111', 0x0a0a0a], ['#c0121c', 0xc0121c], ['#1f4fc0', 0x1f4fc0], ['#2a9d4b', 0x2a9d4b], ['#a8abb0', 0xa8abb0], ['#e8730c', 0xe8730c]];
@@ -278,6 +372,55 @@ PAINTS.forEach(([css, hex], idx) => {
   };
   $('colors').appendChild(chip);
 });
+
+// ------------------------------------------------------------------ traffic: four cars of the pack in assets/traffic (a different four each visit)
+// The pack's convention: metres, front = +Z, origin on the ground between the axles, wheel_FL/FR/RL/RR pivot at their centres.
+const TRAFFIC_LEN = { compact: 3.26, coupe: 4.24, hatchback: 3.96, minivan: 4.61, offroad: 3.94, pickup: 5.18, sedan: 4.36, sport: 3.91, suv: 4.61, wagon: 4.38 };
+const TRAFFIC_R = { compact: 0.243, coupe: 0.3, hatchback: 0.3, minivan: 0.318, offroad: 0.358, pickup: 0.376, sedan: 0.304, sport: 0.317, suv: 0.376, wagon: 0.304 };
+const trafficCars = [];
+let trafficMode = -1, trafficOn = true;
+Object.keys(TRAFFIC_LEN).sort(() => Math.random() - 0.5).slice(0, 4).forEach((name) => {
+  loader.load('assets/traffic/' + name + '.glb', (g) => {
+    const tg = new THREE.Group(); tg.add(g.scene); tg.visible = false; scene.add(tg);
+    const wheels = ['wheel_FL', 'wheel_FR', 'wheel_RL', 'wheel_RR'].map((w) => g.scene.getObjectByName(w)).filter(Boolean);
+    trafficCars.push({ tg, wheels, r: TRAFFIC_R[name], lat: 0, d: 40, vt: 0, onc: false, active: false });
+    trafficMode = -1;
+  }, undefined, () => { /* a missing model just means one car less */ });
+});
+/** City: oncoming cars in the left lane. Motorway: two cars in our direction (fast lane) + two on the other carriageway. */
+function updateTraffic(dt, v, d0, th0) {
+  const mode = hwMode ? 1 : 0;
+  if (trafficMode !== mode) {
+    trafficMode = mode;
+    const spec = hwMode
+      ? [[-LANE_W, -6, 31, 0], [-LANE_W, 46, 24, 0], [-12.9, 55, -30, 1], [-16.6, 25, -27, 1]]
+      : [[-LANE_W, 32, -14, 1], [-LANE_W, 62, -17, 1], [-LANE_W, 78, -13, 1], null];
+    trafficCars.forEach((t, i) => { const sp = spec[i]; t.active = !!sp; if (sp) { t.lat = sp[0]; t.d = sp[1]; t.vt = sp[2]; t.onc = sp[3] === 1; } });
+  }
+  for (const t of trafficCars) {
+    t.tg.visible = trafficOn && t.active;
+    if (!t.active) continue;
+    t.d += (t.vt - v) * dt;
+    if (t.onc) { if (t.d < -20) t.d = 78; } else if (t.d > 78) t.d = -10; else if (t.d < -14) t.d = 76;
+    const p = pose(t.d, t.lat, d0, th0);
+    t.tg.position.set(p.x, 0, p.z);
+    t.tg.rotation.y = p.yaw + (t.onc ? 0 : Math.PI);
+    const spin = Math.abs(t.vt) / t.r * dt;
+    for (const w of t.wheels) w.rotation.x += spin;
+  }
+}
+
+// main-car selector (Ajustes)
+{
+  const sel = $('carSel');
+  for (const c of CARS) { const o = document.createElement('option'); o.value = c.id; o.textContent = c.name; sel.appendChild(o); }
+  let saved = 'tesla'; try { saved = localStorage.getItem('d3d.car') || 'tesla'; } catch (e) { /* private mode */ }
+  if (!CARS.some((c) => c.id === saved)) saved = 'tesla';
+  sel.value = saved;
+  sel.onchange = () => { try { localStorage.setItem('d3d.car', sel.value); } catch (e) { /* ignore */ } loadCar(sel.value); };
+  window.addEventListener('DOMContentLoaded', () => {});
+  setTimeout(() => loadCar(new URLSearchParams(location.search).get('car') || sel.value), 0);
+}
 
 // ------------------------------------------------------------------ state
 const st = {
@@ -320,6 +463,7 @@ const toggle = (id, on) => $(id).classList.toggle('on', on);
 $('bNight').onclick = () => { night = !night; applyTheme(); };
 $('bLights').onclick = () => { st.headlights = !st.headlights; toggle('bLights', st.headlights); };
 $('bHazard').onclick = () => { st.hazard = !st.hazard; toggle('bHazard', st.hazard); };
+$('bTraffic').onclick = () => { trafficOn = !trafficOn; toggle('bTraffic', trafficOn); };
 $('bCam').onclick = () => { st.follow = !st.follow; toggle('bCam', st.follow); };
 $('bGps').onclick = () => { st.gps = !st.gps; updateGpsUi(); if (st.gps) startGps(); };
 $('bDoors').onclick = () => { st.doorTarget = st.doorTarget ? 0 : 1; toggle('bDoors', !!st.doorTarget); };
@@ -328,7 +472,7 @@ $('bRoad').onclick = () => { roadMode = roadMode === 'auto' ? 'city' : roadMode 
 $('bInfo').onclick = () => { $('credits').hidden = false; };
 $('closeCredits').onclick = () => { $('credits').hidden = true; };
 $('manualSlider').oninput = (e) => { st.speedKmh = +e.target.value; $('manualOut').textContent = e.target.value; };
-toggle('bCam', true); toggle('bGps', true);
+toggle('bCam', true); toggle('bTraffic', true); toggle('bGps', true);
 
 function updateGpsUi() {
   toggle('bGps', st.gps);
@@ -412,6 +556,7 @@ function frame(now) {
   updateRoad(st.odo);
   const th0 = thetaFn(st.odo);
   updateProps(st.odo, th0);
+  updateTraffic(dt, v, st.odo, th0);
   updateBuildings(st.odo, th0);
   updateSigns(st.odo, th0);
 
