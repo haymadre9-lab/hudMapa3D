@@ -6,13 +6,12 @@ que obliga a **citar al autor** e **indicar si se han hecho cambios**.
 Los datos (autor, licencia, enlace) están leídos de los metadatos que traen los propios archivos `.glb`.
 
 Cambios hechos por este proyecto: escalado y recentrado de los modelos; el coche se puede repintar en la app
-(se cambia el color base del material de la carrocería); los modelos de coche añadidos después (Model 3 alternativo, Porsche, Opel) están además **simplificados** (menos triángulos) y con texturas reducidas a 1024 px (512 px el Porsche 930) para que quepan en el móvil.
+(se cambia el color base del material de la carrocería); los modelos de coche añadidos después (Model 3 alternativo, Porsche Carrera 4S, Opel) están además **simplificados** (menos triángulos) y con texturas reducidas a 1024 px para que quepan en el móvil.
 
 | Archivo | Modelo | Autor | Enlace |
 |---|---|---|---|
 | `cars/tesla_model3.glb` | Tesla 2018 Model 3 | Ameer Studio | https://sketchfab.com/3d-models/tesla-2018-model-3-5ef9b845aaf44203b6d04e2c677e444f |
 | `cars/tesla_model3_b.glb` | Tesla M3 model | wintrez | https://sketchfab.com/3d-models/tesla-m3-model-3a602469d7874d1397efa67182198705 |
-| `cars/porsche_911_turbo_1975.glb` | FREE 1975 Porsche 911 (930) Turbo | Lionsharp Studios (CC BY 4.0) | https://sketchfab.com/3d-models/free-1975-porsche-911-930-turbo-8568d9d14a994b9cae59499f0dbed21e |
 | `cars/porsche_911_carrera_4s.glb` | (FREE) Porsche 911 Carrera 4S | Karol Miklas (**CC BY-SA 4.0**: las copias modificadas se comparten con la misma licencia) | https://sketchfab.com/3d-models/free-porsche-911-carrera-4s-d01b254483794de3819786d93e0e1ebf |
 | `cars/opel_gt.glb` | Opel GT Retopo | systmh (**CC BY-NC-SA 4.0**: solo uso no comercial, y compartir igual) | https://sketchfab.com/3d-models/opel-gt-retopo-badcab3c8a3d42359c8416db8a7427fe |
 | `traffic/*.glb` (compact, coupe, hatchback, minivan, offroad, pickup, sedan, sport, suv, wagon) | Generic passenger car pack (CC BY 4.0) | Comrade1280 | https://sketchfab.com/3d-models/generic-passenger-car-pack-20f9af9b8a404d5cb022ac6fe87f21f5 |

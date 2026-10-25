@@ -110,7 +110,11 @@
     <button id="bCam" title="Cámara de seguimiento">🎥</button>
     <button id="bInfo" title="Créditos">ⓘ</button>
     </div>
+    <label>Día / noche<select id="nightSel"><option value="auto">Automático (según el sol)</option><option value="day">Siempre día</option><option value="night">Siempre noche</option></select></label>
+    <label>Clima<select id="wxSel"><option value="auto">Real (según tu posición)</option><option value="clear">Despejado</option><option value="rain">Lluvia</option><option value="snow">Nieve</option><option value="fog">Niebla</option></select></label>
     <label>Coche principal<select id="carSel"></select></label>
+    <label>Código de enlace con el móvil / el coche<input id="linkCode" type="text" placeholder="El mismo código en los dos aparatos" autocomplete="off" autocapitalize="none" spellcheck="false"></label>
+    <p class="small">Lo que busques y aceptes en uno aparece en el otro. Solo se envía el nombre y las coordenadas del lugar (nunca favoritos ni ajustes) a través de ntfy.sh. Cualquiera que conozca el código puede ver esos destinos: usa uno largo y no lo compartas. <button id="linkGen" type="button">Generar código</button></p>
     <label>Clave de TomTom (opcional)<input id="ttKey" type="password" placeholder="Se guarda solo en este navegador" autocomplete="off"></label>
     <p class="small">Se usa para buscar y trazar rutas con TomTom si tu clave tiene activados Search y Routing. Sin clave se usan servicios libres (Photon y OSRM). Nunca se sube a ningún sitio.</p>
     <p class="small warn" id="keyNote"></p>

@@ -250,19 +250,49 @@ function parseMax(raw) {
   m = s.match(/^(\d+)\s*mph$/); if (m) return Math.round(+m[1] * 1.609);
   return { 'es:urban': 50, 'es:rural': 90, 'es:trunk': 100, 'es:motorway': 120 }[s] ?? null;
 }
+const CLASS_LIMIT = { motorway: 120, motorway_link: 80, trunk: 100, trunk_link: 70, primary: 90, primary_link: 50, secondary: 90, secondary_link: 50, tertiary: 70, unclassified: 50, residential: 30, living_street: 20, service: 20, service_other: 20, road: 50 };
+/** Valhalla map matching on the public OpenStreetMap server: gives the speed limit of the road under us (CORS open, no key). */
+async function valhallaInfo(lat, lon) {
+  const c = new AbortController(), timer = setTimeout(() => c.abort(), 9000);
+  try {
+    const r = await fetch('https://valhalla1.openstreetmap.de/trace_attributes', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: c.signal,
+      body: JSON.stringify({ shape: [{ lat, lon }, { lat: lat + 0.00009, lon: lon + 0.00003 }], costing: 'auto', shape_match: 'map_snap',
+        filters: { attributes: ['edge.speed_limit', 'edge.road_class', 'edge.names', 'edge.use', 'edge.tunnel'], action: 'include' } }),
+    });
+    if (!r.ok) return null;
+    const e = ((await r.json()).edges || [])[0];
+    if (!e) return null;
+    const cls = e.road_class || 'road';
+    const known = typeof e.speed_limit === 'number' && e.speed_limit > 0 && e.speed_limit < 200;
+    const limit = known ? e.speed_limit : (CLASS_LIMIT[cls] ?? null);
+    return { limit, approx: !known && limit != null, cls, ref: null, name: (e.names || [])[0] || null, motorway: cls === 'motorway' || cls === 'trunk', tunnel: !!e.tunnel };
+  } catch (err) { return null; } finally { clearTimeout(timer); }
+}
 export async function roadInfo(lat, lon) {
+  const v = await valhallaInfo(lat, lon);
+  if (v) return v;
   const q = encodeURIComponent(`[out:json][timeout:6];way(around:25,${lat},${lon})[highway];out tags 6;`);
-  for (const ep of ['https://overpass-api.de/api/interpreter', 'https://overpass.kumi.systems/api/interpreter']) {
-    try {
-      const j = await (await fetch(ep + '?data=' + q)).json();
-      const tags = (j.elements || []).map((e) => e.tags || {}).filter((g) => RANK.includes(g.highway));
-      tags.sort((x, y) => RANK.indexOf(x.highway) - RANK.indexOf(y.highway));
-      const best = tags[0];
-      if (!best) return null;
-      return { limit: parseMax(best.maxspeed), cls: best.highway, ref: best.ref || null, name: best.name || null, motorway: /^(motorway|trunk)/.test(best.highway) };
-    } catch (e) { /* next server */ }
+  // ask several public Overpass servers at once (they are often slow) and take the first good answer
+  const eps = ['https://overpass-api.de/api/interpreter', 'https://overpass.kumi.systems/api/interpreter', 'https://overpass.private.coffee/api/interpreter', 'https://maps.mail.ru/osm/tools/overpass/api/interpreter'];
+  const one = async (ep) => {
+    const c = new AbortController(), timer = setTimeout(() => c.abort(), 9000);
+    try { const r = await fetch(ep + '?data=' + q, { signal: c.signal }); if (!r.ok) throw new Error('http'); const j = await r.json(); if (!Array.isArray(j.elements)) throw new Error('bad'); return j; } finally { clearTimeout(timer); }
+  };
+  let j = null;
+  try { j = await Promise.any(eps.map(one)); } catch (e) { return null; }
+  const tags = (j.elements || []).map((e) => e.tags || {}).filter((g) => RANK.includes(g.highway));
+  tags.sort((x, y) => RANK.indexOf(x.highway) - RANK.indexOf(y.highway));
+  const best = tags[0];
+  if (!best) return null;
+  let limit = parseMax(best.maxspeed), approx = false;
+  if (limit == null) {   // no maxspeed in OpenStreetMap: use the Spanish default for the road class
+    const urban = /urban/i.test(String(best['source:maxspeed'] || best['maxspeed:type'] || '')) || best['zone:maxspeed'] === 'ES:urban';
+    const byClass = { motorway: 120, motorway_link: 80, trunk: 100, trunk_link: 70, primary: 90, primary_link: 50, secondary: 90, secondary_link: 50, tertiary: 70, unclassified: 50, residential: 30, living_street: 20, service: 20, road: 50 };
+    limit = urban ? (best.highway === 'residential' ? 30 : 50) : (byClass[best.highway] ?? null);
+    approx = limit != null;
   }
-  return null;
+  return { limit, approx, cls: best.highway, ref: best.ref || null, name: best.name || null, motorway: /^(motorway|trunk)/.test(best.highway), tunnel: ['yes', 'building_passage', 'covered'].includes(best.tunnel) };
 }
 
 /** A made-up route (no network) with bends, turns and a motorway stretch, for trying the scene. */

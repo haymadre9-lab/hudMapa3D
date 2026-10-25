@@ -5,6 +5,7 @@ import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { search, routesTo, flowTraffic, roadInfo, testRoute, testAlternative, stepLabel, ARROWS, onNote } from './nav.js';
 import { directionTexture, limitTexture, stopTexture, yieldTexture, crossingTexture, radarTexture } from './signs.js';
 import { RoadData } from './roaddata.js';
+import { Link } from './link.js';
 import { VoiceGuide } from './voice.js';
 
 // ------------------------------------------------------------------ constants (same road model as the Android app)
@@ -175,7 +176,7 @@ const carInner = new THREE.Group();     // scaled, centred model
 carRoot.add(carInner);
 scene.add(carRoot);
 const wheelPairs = [];
-const lampMats = { head: [], tail: [], brake: [], sigL: [], sigR: [] };
+const lampMats = { head: [], tail: [], brake: [], sigL: [], sigR: [], tailL: [], tailR: [] };
 const bodyMats = [];
 const headSpots = [];
 let carReady = false;
@@ -184,7 +185,9 @@ const doorPivots = [];
 function classifyMaterial(m) {
   const n = (m.name || '').toLowerCase();
   if (/^primary/.test(n)) bodyMats.push(m);
-  if (/indicator/.test(n)) (/_l/.test(n) ? lampMats.sigL : lampMats.sigR).push(m);
+  if (/left.{0,6}rear.?light/.test(n)) lampMats.tailL.push(m);          // the visible rear clusters double as turn signals
+  else if (/right.{0,6}rear.?light/.test(n)) lampMats.tailR.push(m);
+  else if (/indicator/.test(n)) (/_l/.test(n) ? lampMats.sigL : lampMats.sigR).push(m);
   else if (/brea?k/.test(n)) lampMats.brake.push(m);
   else if (/rear.?light|tembus.?red|satin.?red/.test(n)) lampMats.tail.push(m);
   else if (/(front.{0,6}light|fog)/.test(n)) lampMats.head.push(m);
@@ -192,6 +195,10 @@ function classifyMaterial(m) {
 
 function buildTesla(gltf) {
   const model = gltf.scene;
+  // the full-width rear light bar shares its material with the right rear cluster: give it its own so a right-turn signal lights only the cluster
+  { model.updateMatrixWorld(true); const cand = [];
+    model.traverse((o) => { if (o.isMesh && o.material && o.material.name === 'right_rear_light') cand.push([o, new THREE.Box3().setFromObject(o).getSize(new THREE.Vector3()).x]); });
+    if (cand.length > 1) { cand.sort((p, q) => q[1] - p[1]); const bar = cand[0][0]; bar.material = bar.material.clone(); bar.material.name = 'rear_light_strip'; } }
   // drop the ground-reflection / fake shadow planes baked into the model
   const junk = [];
   model.traverse((o) => {
@@ -379,29 +386,41 @@ const TRAFFIC_LEN = { compact: 3.26, coupe: 4.24, hatchback: 3.96, minivan: 4.61
 const TRAFFIC_R = { compact: 0.243, coupe: 0.3, hatchback: 0.3, minivan: 0.318, offroad: 0.358, pickup: 0.376, sedan: 0.304, sport: 0.317, suv: 0.376, wagon: 0.304 };
 const trafficCars = [];
 let trafficMode = -1, trafficOn = true;
-Object.keys(TRAFFIC_LEN).sort(() => Math.random() - 0.5).slice(0, 4).forEach((name) => {
+Object.keys(TRAFFIC_LEN).sort(() => Math.random() - 0.5).slice(0, 2).forEach((name, idx) => {
   loader.load('assets/traffic/' + name + '.glb', (g) => {
     const tg = new THREE.Group(); tg.add(g.scene); tg.visible = false; scene.add(tg);
     const wheels = ['wheel_FL', 'wheel_FR', 'wheel_RL', 'wheel_RR'].map((w) => g.scene.getObjectByName(w)).filter(Boolean);
-    trafficCars.push({ tg, wheels, r: TRAFFIC_R[name], lat: 0, d: 40, vt: 0, onc: false, active: false });
+    trafficCars.push({ tg, wheels, r: TRAFFIC_R[name], idx, lat: 0, d: 0, vt: 0, onc: false, wait: 4 + idx * 14, active: false });
     trafficMode = -1;
   }, undefined, () => { /* a missing model just means one car less */ });
 });
-/** City: oncoming cars in the left lane. Motorway: two cars in our direction (fast lane) + two on the other carriageway. */
+/**
+ * One car now and then. City: an oncoming car in the left lane (all at the same speed, so they never cross).
+ * Motorway: one car in our direction in the fast lane, one oncoming on the other carriageway.
+ * After a car passes it waits 15-45 s before coming back.
+ */
 function updateTraffic(dt, v, d0, th0) {
   const mode = hwMode ? 1 : 0;
   if (trafficMode !== mode) {
     trafficMode = mode;
-    const spec = hwMode
-      ? [[-LANE_W, -6, 31, 0], [-LANE_W, 46, 24, 0], [-12.9, 55, -30, 1], [-16.6, 25, -27, 1]]
-      : [[-LANE_W, 32, -14, 1], [-LANE_W, 62, -17, 1], [-LANE_W, 78, -13, 1], null];
-    trafficCars.forEach((t, i) => { const sp = spec[i]; t.active = !!sp; if (sp) { t.lat = sp[0]; t.d = sp[1]; t.vt = sp[2]; t.onc = sp[3] === 1; } });
+    trafficCars.forEach((t) => { t.active = false; t.wait = 2 + t.idx * 12 + Math.random() * 6; });
   }
   for (const t of trafficCars) {
-    t.tg.visible = trafficOn && t.active;
-    if (!t.active) continue;
+    if (!t.active) {
+      t.tg.visible = false;
+      if (!trafficOn) continue;
+      t.wait -= dt;
+      if (t.wait > 0) continue;
+      // spawn: city = oncoming in the left lane; motorway = car 0 behind us in the fast lane, car 1 oncoming on the other carriageway
+      if (hwMode && t.idx === 0) { t.lat = -LANE_W; t.d = -12; t.vt = 28; t.onc = false; }
+      else if (hwMode) { t.lat = -14.75; t.d = 90; t.vt = -28; t.onc = true; }
+      else { t.lat = -LANE_W; t.d = 90; t.vt = -14; t.onc = true; }
+      t.active = true;
+    }
     t.d += (t.vt - v) * dt;
-    if (t.onc) { if (t.d < -20) t.d = 78; } else if (t.d > 78) t.d = -10; else if (t.d < -14) t.d = 76;
+    const gone = t.onc ? t.d < -25 : (t.d > 95 || t.d < -30);
+    if (gone || !trafficOn) { t.active = false; t.wait = 15 + Math.random() * 30; t.tg.visible = false; continue; }
+    t.tg.visible = true;
     const p = pose(t.d, t.lat, d0, th0);
     t.tg.position.set(p.x, 0, p.z);
     t.tg.rotation.y = p.yaw + (t.onc ? 0 : Math.PI);
@@ -460,7 +479,37 @@ canvas.addEventListener('pointermove', (e) => {
 canvas.addEventListener('wheel', (e) => { st.cam.dist = clamp(st.cam.dist * (1 + e.deltaY * 0.001), 3.2, 20); st.lastTouch = performance.now(); }, { passive: true });
 
 const toggle = (id, on) => $(id).classList.toggle('on', on);
-$('bNight').onclick = () => { night = !night; applyTheme(); };
+let nightMode = 'auto';      // auto (sun position) | day | night
+try { nightMode = localStorage.getItem('d3d.night') || 'auto'; } catch (e) { /* private mode */ }
+function isNightAt(lat, lon, date) {
+  const rad = Math.PI / 180, start = Date.UTC(date.getUTCFullYear(), 0, 0), n = Math.floor((date - start) / 864e5);
+  const decl = 23.44 * rad * Math.sin(2 * Math.PI * (284 + n) / 365);
+  const solarH = date.getUTCHours() + date.getUTCMinutes() / 60 + lon / 15;
+  const ha = (solarH - 12) * 15 * rad;
+  const sinAlt = Math.sin(lat * rad) * Math.sin(decl) + Math.cos(lat * rad) * Math.cos(decl) * Math.cos(ha);
+  return sinAlt < Math.sin(-3 * rad);      // sun more than 3 degrees below the horizon
+}
+let inTunnel = false, wx = 'clear', wxMode = 'auto', autoLightsWanted = false;
+try { wxMode = localStorage.getItem('d3d.wx') || 'auto'; } catch (e) { /* private mode */ }
+/** Headlights on at night, inside tunnels and in rain / snow / fog; they only change when one of those changes (the button still works by hand). */
+function syncAutoLights(first) {
+  const want = night || inTunnel || wx !== 'clear';
+  if (want === autoLightsWanted && !first) return;
+  if (first && !want) { autoLightsWanted = want; return; }
+  autoLightsWanted = want; st.headlights = want; toggle('bLights', want);
+}
+function autoNightTick(first) {
+  if (nightMode === 'auto') {
+    let lat = 43.26, lon = -2.93;
+    if (st.pos) { lat = st.pos.lat; lon = st.pos.lon; } else { const lp = store.get('lastpos', null); if (lp) { lat = lp.lat; lon = lp.lon; } }
+    const nowNight = isNightAt(lat, lon, new Date());
+    if (nowNight !== night) {
+      night = nowNight; applyTheme();
+      syncAutoLights(first);   // headlights follow day <-> night
+    } else if (first) syncAutoLights(true);
+  } else if ((nightMode === 'night') !== night) { night = nightMode === 'night'; applyTheme(); }
+}
+$('bNight').onclick = () => { nightMode = night ? 'day' : 'night'; try { localStorage.setItem('d3d.night', nightMode); } catch (e) { /* ignore */ } $('nightSel').value = nightMode; autoNightTick(false); };
 $('bLights').onclick = () => { st.headlights = !st.headlights; toggle('bLights', st.headlights); };
 $('bHazard').onclick = () => { st.hazard = !st.hazard; toggle('bHazard', st.hazard); };
 $('bTraffic').onclick = () => { trafficOn = !trafficOn; toggle('bTraffic', trafficOn); };
@@ -504,10 +553,54 @@ document.addEventListener('visibilitychange', () => { if (document.visibilitySta
 window.addEventListener('pointerdown', keepAwake, { once: true });
 keepAwake();
 
+setTimeout(() => { $('nightSel').value = nightMode; $('nightSel').onchange = () => { nightMode = $('nightSel').value; try { localStorage.setItem('d3d.night', nightMode); } catch (e) { /* ignore */ } autoNightTick(false); }; autoNightTick(true); setInterval(() => autoNightTick(false), 20000); }, 0);
+const FOG_RANGE = { clear: [35, 150], rain: [20, 90], snow: [15, 70], fog: [6, 40] };
+const PN = 600, ppos = new Float32Array(PN * 3);
+for (let i = 0; i < PN; i++) { ppos[3 * i] = (Math.random() - 0.5) * 18; ppos[3 * i + 1] = Math.random() * 7; ppos[3 * i + 2] = -28 + Math.random() * 33; }
+const pgeo = new THREE.BufferGeometry(); pgeo.setAttribute('position', new THREE.BufferAttribute(ppos, 3));
+const pmat = new THREE.PointsMaterial({ color: 0xcfe3ff, size: 0.07, transparent: true, opacity: 0.75, depthWrite: false });
+const precip = new THREE.Points(pgeo, pmat); precip.frustumCulled = false; precip.visible = false; scene.add(precip);
+function updatePrecip(dt) {
+  if (!precip.visible) return;
+  const fall = wx === 'snow' ? 1.6 : 12;
+  for (let i = 0; i < PN; i++) {
+    ppos[3 * i + 1] -= fall * dt;
+    if (wx === 'snow') ppos[3 * i] += Math.sin(performance.now() / 700 + i) * 0.4 * dt;
+    if (ppos[3 * i + 1] < 0) { ppos[3 * i + 1] = 6 + Math.random(); ppos[3 * i] = (Math.random() - 0.5) * 18; ppos[3 * i + 2] = -28 + Math.random() * 33; }
+  }
+  pgeo.attributes.position.needsUpdate = true;
+}
+function setWeather(w) {
+  if (w === wx) return;
+  wx = w; precip.visible = w === 'rain' || w === 'snow';
+  pmat.size = w === 'snow' ? 0.14 : 0.11; pmat.color.setHex(w === 'snow' ? 0xffffff : 0xcfe3ff);
+  applyTheme(); syncAutoLights();
+}
+/** Real weather at our position (Open-Meteo, no key). */
+async function refreshWeather() {
+  if (wxMode !== 'auto') return;
+  let lat = 43.26, lon = -2.93;
+  if (st.pos) { lat = st.pos.lat; lon = st.pos.lon; } else { const lp = store.get('lastpos', null); if (lp) { lat = lp.lat; lon = lp.lon; } }
+  try {
+    const j = await (await fetch('https://api.open-meteo.com/v1/forecast?latitude=' + lat + '&longitude=' + lon + '&current=weather_code,visibility')).json();
+    const code = j.current.weather_code, vis = j.current.visibility ?? 20000;
+    const w = (code >= 71 && code <= 77) || code === 85 || code === 86 ? 'snow'
+      : (code >= 51 && code <= 67) || (code >= 80 && code <= 82) || code >= 95 ? 'rain'
+      : code === 45 || code === 48 || vis < 1000 ? 'fog' : 'clear';
+    if (wxMode === 'auto') setWeather(w);
+  } catch (e) { /* offline: keep what we have */ }
+}
+setTimeout(() => {
+  const sel = $('wxSel'); sel.value = wxMode;
+  sel.onchange = () => { wxMode = sel.value; try { localStorage.setItem('d3d.wx', wxMode); } catch (e) { /* ignore */ } if (wxMode === 'auto') refreshWeather(); else setWeather(wxMode); };
+  const urlWx = new URLSearchParams(location.search).get('wx');
+  if (urlWx) { wxMode = urlWx; sel.value = urlWx; }
+  if (wxMode === 'auto') { refreshWeather(); setInterval(refreshWeather, 600000); } else setWeather(wxMode);
+}, 3000);
 let applyTheme = function () {
   const t = night ? NIGHT : DAY;
   scene.background = new THREE.Color(t.bg);
-  scene.fog = new THREE.Fog(t.fog, 35, 150);
+  scene.fog = new THREE.Fog(t.fog, ...(FOG_RANGE[wx] || FOG_RANGE.clear));
   sun.intensity = t.sun; hemi.intensity = t.hemi; scene.environmentIntensity = t.env;
   asphalt.color.setHex(t.asphalt); grassMat.color.setHex(t.grass);
   TINTS.forEach((c, i) => roadMats[i + 1].color.setHex(c).multiplyScalar(night ? 0.45 : 1));
@@ -557,6 +650,7 @@ function frame(now) {
   const th0 = thetaFn(st.odo);
   updateProps(st.odo, th0);
   updateTraffic(dt, v, st.odo, th0);
+  updatePrecip(dt);
   updateBuildings(st.odo, th0);
   updateSigns(st.odo, th0);
 
@@ -568,15 +662,33 @@ function frame(now) {
     carRoot.position.set(0.55 * st.park, 0, 0);
     st.wheelAngle += v / 0.34 * dt;
     for (const w of wheelPairs) w.rotation.x = -st.wheelAngle;
-    st.door += (st.doorTarget - st.door) * Math.min(1, dt * 4);
+    st.door += (((st.doorTarget || st.autoDoor) ? 1 : 0) - st.door) * Math.min(1, dt * 4);
     for (const d of doorPivots) d.pivot.rotation.y = d.sign * 35 * Math.PI / 180 * st.door;
 
+    // automatic aids: turn signal before a turn / exit of the route, hazard lights after hard braking or inside a jam, doors open on arrival
+    let autoL = false, autoR = false, autoHaz = false;
+    const sNow = s0 + (st.odo - odo0);
+    if (course) {
+      const nx = course.next(sNow);
+      if (nx) {
+        const lim = hwMode ? 400 : 150;
+        if (nx.dist < lim) { const dir = { L: -1, SL: -1, U: -1, R: 1, SR: 1, X: 1 }[nx.step.kind] || 0; if (dir) { st.sigHold = dir; st.sigUntil = nx.step.offset + 25; } }
+      }
+      if (st.sigHold && sNow < st.sigUntil) { autoL = st.sigHold < 0; autoR = st.sigHold > 0; } else st.sigHold = 0;
+      if (course.total - sNow < 25 && st.speedKmh < 3) st.autoDoor = true;
+    } else st.sigHold = 0;
+    if (!course || st.speedKmh > 8) st.autoDoor = false;
+    if (st.speedKmh > 30 && st.decel > 25) st.hazUntil = now + 4000;
+    autoHaz = now < (st.hazUntil || 0) || (!!course && rt.traffic && rt.traffic.level === 3 && rt.traffic.dist <= 30 && st.speedKmh < 25);
     const blink = Math.floor(now / 625) % 2 === 0;
     setLamps(lampMats.head, st.headlights, 0xfff0c0, 3);
     setLamps(lampMats.tail, st.headlights || braking, 0xff1010, 2.4);
     setLamps(lampMats.brake, braking, 0xff1010, 6);
-    setLamps(lampMats.sigL, st.hazard && blink, 0xff8c00, 4);
-    setLamps(lampMats.sigR, st.hazard && blink, 0xff8c00, 4);
+    const tailOn = st.headlights || braking, sigLon = (st.hazard || autoHaz || autoL) && blink, sigRon = (st.hazard || autoHaz || autoR) && blink;
+    if (sigLon) setLamps(lampMats.tailL, true, 0xff8c00, 6); else setLamps(lampMats.tailL, tailOn, 0xff1010, 2.4);
+    if (sigRon) setLamps(lampMats.tailR, true, 0xff8c00, 6); else setLamps(lampMats.tailR, tailOn, 0xff1010, 2.4);
+    setLamps(lampMats.sigL, sigLon, 0xff8c00, 4);
+    setLamps(lampMats.sigR, sigRon, 0xff8c00, 4);
     for (const sp of headSpots) sp.intensity = st.headlights ? (night ? 250 : 60) : 0;
   }
 
@@ -771,7 +883,7 @@ function renderResults() {
     row.querySelector('.n').textContent = p.name;
     if (isFav(p)) { const hb = document.createElement('button'); hb.textContent = home && samePlace(home, p) ? '🏠' : '🏡'; hb.onclick = (e) => { e.stopPropagation(); setHome(p); renderResults(); }; row.appendChild(hb); }
     const sb = document.createElement('button'); sb.textContent = isFav(p) ? '★' : '☆'; sb.onclick = (e) => { e.stopPropagation(); toggleFav(p); renderResults(); }; row.appendChild(sb);
-    row.onclick = () => { closeSearch(); startRoute(p); };
+    row.onclick = () => { closeSearch(); Link.publish(p); startRoute(p); };
     box.appendChild(row);
   }
   if (!box.children.length) { const e = document.createElement('div'); e.className = 'empty'; e.textContent = text.length < 3 ? 'Escribe al menos 3 letras' : (liveFor === text ? 'Sin resultados' : 'Buscando…'); box.appendChild(e); }
@@ -798,9 +910,12 @@ panel.addEventListener('pointerup', (e) => {
 
 // --- settings (TomTom key stays in this browser only) and the test route
 $('ttKey').value = ttKey;
+$('linkCode').value = Link.code;
+$('linkGen').onclick = () => { $('linkCode').value = Link.randomCode(); };
+Link.start((p) => { say('Destino recibido del otro dispositivo: ' + p.name.split(',')[0]); startRoute(p); });
 $('bSettings').onclick = () => { $('settings').hidden = false; };
 $('xSettings').onclick = () => { $('settings').hidden = true; };
-$('closeSettings').onclick = () => { ttKey = $('ttKey').value.trim(); store.set('tomtom', ttKey); $('settings').hidden = true; };
+$('closeSettings').onclick = () => { if ($('linkCode').value.trim() !== Link.code) Link.setCode($('linkCode').value); ttKey = $('ttKey').value.trim(); store.set('tomtom', ttKey); $('settings').hidden = true; };
 window.d3d = { testRoute: () => { const o = origin() || { lat: 43.263, lon: -2.935 }; const r = testRoute(o.lat, o.lon); setRoute(r, null, true, [testAlternative(r)]); rt.limit = 90; say('Ruta de prueba'); }, clearRoute, voice: null,
   testSigns: (k = 1) => { fakeItems = true; itemsAt = { odo: st.odo, list: [{ kind: 'p', dist: 60 * k, max: 0, key: 'a' }, { kind: 's', dist: 90 * k, max: 0, key: 'b' }, { kind: 'c', dist: 130 * k, max: 0, key: 'c' }, { kind: 't', dist: 170 * k, max: 0, key: 'd' }, { kind: 'r', dist: 300 * k, max: 80, key: 'e' }] }; } };
 $('bTest').onclick = () => { $('settings').hidden = true; window.d3d.testRoute(); };
@@ -924,6 +1039,7 @@ function updateRoadItems(d0, th0) {
 let shownLimit = undefined;
 function hudFrame() {
   if (shownLimit !== rt.limit) { shownLimit = rt.limit; $('limit').hidden = rt.limit == null; $('limit').textContent = rt.limit ?? ''; }
+  $('limit').classList.toggle('approx', !!rt.limitApprox);
   const over = (rt.limit != null && st.speedKmh > rt.limit + 3) || (rt.radarMax != null && st.speedKmh > rt.radarMax + 3);
   ring.style.stroke = over ? '#ff5252' : '';
   $('halo').classList.toggle('on', over);
@@ -959,7 +1075,7 @@ setInterval(async () => {
   const moved = Math.abs(lat - rt.infoLat) * 110540 + Math.abs(lon - rt.infoLon) * 111320 * Math.cos(lat * Math.PI / 180), now = performance.now();
   if (moved < 60 && now - rt.infoAt < 45000) return;
   rt.infoBusy = true; rt.infoLat = lat; rt.infoLon = lon; rt.infoAt = now;
-  try { const info = await roadInfo(lat, lon); if (info) { rt.limit = info.limit; rt.motorway = info.motorway; } } catch (e) { /* offline */ } finally { rt.infoBusy = false; }
+  try { const info = await roadInfo(lat, lon); if (info) { rt.limit = info.limit; rt.limitApprox = info.approx; rt.motorway = info.motorway; if (!!info.tunnel !== inTunnel) { inTunnel = !!info.tunnel; syncAutoLights(); } } } catch (e) { /* offline */ } finally { rt.infoBusy = false; }
 }, 3000);
 
 // --- every 4 minutes: fresh traffic (same road -> new colours; a faster different road -> offered as alternative)
