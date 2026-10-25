@@ -190,7 +190,7 @@ function classifyMaterial(m) {
   else if (/right.{0,6}rear.?light/.test(n)) { m.userData.keepMap = true; lampMats.tailR.push(m); }
   else if (/indicator/.test(n)) (/_l/.test(n) ? lampMats.sigL : lampMats.sigR).push(m);
   else if (/brea?k/.test(n)) lampMats.brake.push(m);
-  else if (/rear.?light|tembus.?red|satin.?red/.test(n)) lampMats.tail.push(m);
+  else if (/rear.?light/.test(n)) lampMats.tail.push(m);
   else if (/(front.{0,6}light|fog)/.test(n)) lampMats.head.push(m);
 }
 
