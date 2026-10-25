@@ -455,21 +455,18 @@ const st = {
   cam: { yaw: 0, pitch: 11, dist: 6.8 }, lastTouch: 0,
 };
 
-/** Rear cluster of one side: amber while its turn signal is lit (base colour + emission, like the Android app), red tail light otherwise. */
-function sideLamp(mats, sig, tailOn) {
+// Lamps work like in the Android app: when lit, the material's base colour AND its emission take the lamp colour (the emissive texture,
+// when the model has one, keeps only the real lamp strips bright); when off, the original colour comes back.
+const RED = [1, 0.05, 0.03], WHITE = [1, 0.96, 0.8], AMBER = [1, 0.55, 0.02];
+function lamp(mats, level, rgb, k) {
   for (const m of mats) {
-    if (m.userData.c0 === undefined) m.userData.c0 = m.color.getHex();
-    if (sig) { m.color.setHex(0xff8c00); m.emissive.setHex(0xff8c00); m.emissiveIntensity = 8; }
-    else { m.color.setHex(m.userData.c0); m.emissive.setHex(0xff1010); m.emissiveIntensity = tailOn ? 4 : 0; }
+    if (m.userData.c0 === undefined) { m.userData.c0 = m.color.clone(); if (!m.emissiveMap && m.map) { m.emissiveMap = m.map; m.needsUpdate = true; } }   // the texture decides which parts glow
+    if (level > 0) { m.color.setRGB(rgb[0], rgb[1], rgb[2]); m.emissive.setRGB(rgb[0], rgb[1], rgb[2]); m.emissiveIntensity = level * k; }
+    else { m.color.copy(m.userData.c0); m.emissiveIntensity = 0; }
   }
 }
-function setLamps(mats, on, color, intensity) {
-  for (const m of mats) {
-    m.emissive.setHex(color);
-    m.emissiveIntensity = on ? intensity : 0;
-    if (color === 0xff1010 && m.emissiveMap && !m.userData.keepMap) { m.emissiveMap = null; m.needsUpdate = true; } // the baked emissive texture is nearly black: use a flat red glow instead
-  }
-}
+/** Rear cluster of one side: amber while its turn signal is lit, red tail light otherwise. */
+function sideLamp(mats, sig, tailOn) { if (sig) lamp(mats, 1, AMBER, 4); else lamp(mats, tailOn ? 1 : 0, RED, 2.2); }
 
 // ------------------------------------------------------------------ input: camera, buttons, GPS
 const pointers = new Map();
@@ -695,14 +692,14 @@ function frame(now) {
     if (st.speedKmh > 30 && st.decel > 25) st.hazUntil = now + 4000;
     autoHaz = now < (st.hazUntil || 0) || (!!course && rt.traffic && rt.traffic.level === 3 && rt.traffic.dist <= 30 && st.speedKmh < 25);
     const blink = Math.floor(now / 625) % 2 === 0;
-    setLamps(lampMats.head, st.headlights, 0xfff0c0, 3);
-    setLamps(lampMats.tail, st.headlights || braking, 0xff1010, 2.4);
-    setLamps(lampMats.brake, braking, 0xff1010, 6);
+    lamp(lampMats.head, st.headlights ? 1 : 0, WHITE, 3);
+    lamp(lampMats.tail, (st.headlights || braking) ? 1 : 0, RED, 2.2);
+    lamp(lampMats.brake, braking ? 1.5 : (st.headlights ? 0.5 : 0), RED, 1.4);
     const tailOn = st.headlights || braking, sigLon = (st.hazard || autoHaz || autoL) && blink, sigRon = (st.hazard || autoHaz || autoR) && blink;
     sideLamp(lampMats.tailL, sigLon, tailOn);
     sideLamp(lampMats.tailR, sigRon, tailOn);
-    setLamps(lampMats.sigL, sigLon, 0xff8c00, 4);
-    setLamps(lampMats.sigR, sigRon, 0xff8c00, 4);
+    lamp(lampMats.sigL, sigLon ? 1 : 0, AMBER, 4);
+    lamp(lampMats.sigR, sigRon ? 1 : 0, AMBER, 4);
     for (const sp of headSpots) sp.intensity = st.headlights ? (night ? 250 : 60) : 0;
   }
 
@@ -1102,7 +1099,6 @@ function updateRoadItems(d0, th0) {
 let shownLimit = undefined;
 function hudFrame() {
   if (shownLimit !== rt.limit) { shownLimit = rt.limit; $('limit').hidden = rt.limit == null; $('limit').textContent = rt.limit ?? ''; }
-  $('limit').classList.toggle('approx', !!rt.limitApprox);
   const over = (rt.limit != null && st.speedKmh > rt.limit + 3) || (rt.radarMax != null && st.speedKmh > rt.radarMax + 3);
   ring.style.stroke = over ? '#ff5252' : '';
   $('halo').classList.toggle('on', over);

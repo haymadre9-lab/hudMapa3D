@@ -131,7 +131,6 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #000; color:
 
 #settings select { width: 100%; margin: 6px 0 12px; padding: 10px; border-radius: 8px; border: 0; background: #2b2d33; color: #fff; font-size: 15px; }
 
-#limit.approx::after { content: "~"; position: absolute; top: -9px; right: -4px; font-size: 20px; color: #fff; text-shadow: 0 0 3px #000; }
 #limit { position: fixed; }
 
 #placeDialog { position: fixed; inset: 0; background: rgba(0,0,0,.6); display: flex; align-items: center; justify-content: center; z-index: 21; }
