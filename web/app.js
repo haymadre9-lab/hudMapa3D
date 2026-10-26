@@ -991,19 +991,24 @@ $('bShare').onclick = () => { $('settings').hidden = true; if (rt.dest) shareDia
   const qs = new URLSearchParams(location.search), shared = [qs.get('title'), qs.get('text'), qs.get('url')].filter(Boolean).join('\n');
   if (shared) { try { history.replaceState(null, '', location.pathname); } catch (e) { /* ignore */ } setTimeout(() => receiveShared(shared), 1500); }
 }
-function openSearch() { $('searchbar').hidden = false; $('hint').className = ''; $('hint').textContent = 'Arrastra hacia abajo para ir a casa' + (home ? '' : ' (marca 🏠 en un favorito)'); $('q').value = ''; live = []; renderResults(); setTimeout(() => $('q').focus(), 50); }
+function openSearch() { $('searchbar').hidden = false; $('hint').className = ''; $('hint').textContent = 'Mantén pulsada la lupa para ir a casa' + (home ? '' : ' (marca 🏠 en un favorito)'); $('q').value = ''; live = []; renderResults(); setTimeout(() => $('q').focus(), 50); }
 function closeSearch() { $('searchbar').hidden = true; $('q').blur(); }
-$('bSearch').onclick = openSearch;
+// tap the magnifier = search; hold it = go straight home
+{
+  const lupa = $('bSearch'); let lpTimer = null, lpFired = false;
+  lupa.addEventListener('pointerdown', () => {
+    lpFired = false; clearTimeout(lpTimer);
+    lpTimer = setTimeout(() => {
+      lpFired = true; if (navigator.vibrate) navigator.vibrate(30);
+      if (home) startRoute(home);
+      else { openSearch(); $('hint').className = 'warn'; $('hint').textContent = 'No hay casa guardada: marca 🏠 en un favorito'; }
+    }, 650);
+  });
+  for (const ev of ['pointerup', 'pointerleave', 'pointercancel']) lupa.addEventListener(ev, () => clearTimeout(lpTimer));
+  lupa.addEventListener('contextmenu', (e) => e.preventDefault());
+  lupa.onclick = () => { if (lpFired) { lpFired = false; return; } openSearch(); };
+}
 $('closeSearch').onclick = closeSearch;
-let dragY = null;
-const panel = document.querySelector('#searchbar .panel');
-panel.addEventListener('pointerdown', (e) => { dragY = e.target.tagName === 'INPUT' ? null : e.clientY; });
-panel.addEventListener('pointerup', (e) => {
-  if (dragY !== null && e.clientY - dragY > 110) {
-    if (home) { closeSearch(); startRoute(home); } else { $('hint').className = 'warn'; $('hint').textContent = 'No hay casa guardada: pulsa 🏠 en un favorito'; }
-  }
-  dragY = null;
-});
 
 // --- settings (TomTom key stays in this browser only) and the test route
 $('ttKey').value = ttKey;

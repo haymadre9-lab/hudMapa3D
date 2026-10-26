@@ -155,3 +155,5 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #000; color:
 #radar b { font-size: 42px; line-height: 1; }
 #radar b.big3 { font-size: 34px; }
 #radar small { font-size: 14px; font-weight: 700; margin: 0; padding: 3px 10px; border-radius: 9px; background: rgba(0,0,0,.62); color: #fff; }
+
+#quick button.off { opacity: .55; }
