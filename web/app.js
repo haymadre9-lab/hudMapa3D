@@ -399,7 +399,7 @@ function loadCar(id) {
 
 
 // paint chips
-const PAINTS = [['#eeeeee', null], ['#f5f5f5', 0xf2f2f2], ['#111111', 0x0a0a0a], ['#c0121c', 0xc0121c], ['#1f4fc0', 0x1f4fc0], ['#2a9d4b', 0x2a9d4b], ['#a8abb0', 0xa8abb0], ['#e8730c', 0xe8730c]];
+const PAINTS = [['#eeeeee', null], ['#f5f5f5', 0xf2f2f2], ['#111111', 0x0a0a0a], ['#c0121c', 0xc0121c], ['#1f4fc0', 0x1f4fc0], ['#2a9d4b', 0x2a9d4b], ['#a8abb0', 0xa8abb0], ['#6b6f75', 0x6b6f75], ['#e8730c', 0xe8730c]];
 const origColors = new Map();
 PAINTS.forEach(([css, hex], idx) => {
   const chip = document.createElement('i'); chip.style.background = idx === 0 ? 'conic-gradient(#999,#fff,#999)' : css;
