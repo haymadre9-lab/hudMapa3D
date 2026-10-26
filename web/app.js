@@ -923,9 +923,9 @@ function renderResults() {
     .filter(([p]) => !text || p.name.toLowerCase().includes(text));
   const extra = live.filter((l) => !local.some(([p]) => p.name === l.name)).map((p) => [p, '📍']);
   const box = $('results'); box.innerHTML = '';
-  for (const [p, icon] of [...local, ...extra]) {
+  for (const [p, mark] of [...local, ...extra]) {
     const row = document.createElement('div'); row.className = 'it';
-    row.innerHTML = '<span>' + icon + '</span><span class="n"></span>';
+    row.innerHTML = '<span>' + mark + '</span><span class="n"></span>';
     row.querySelector('.n').textContent = p.name;
     const shb = document.createElement('button'); shb.innerHTML = icon('share'); shb.style.color = '#7ce0ff'; shb.onclick = (e) => { e.stopPropagation(); closeSearch(); shareDialog(p); }; row.appendChild(shb);
     if (isFav(p)) { const eb = document.createElement('button'); eb.textContent = '✏️'; eb.onclick = (e) => { e.stopPropagation(); editFav(p); }; row.appendChild(eb); }
