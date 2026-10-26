@@ -6,6 +6,7 @@ import { search, routesTo, flowTraffic, roadInfo, testRoute, testAlternative, st
 import { directionTexture, limitTexture, stopTexture, yieldTexture, crossingTexture, radarTexture } from './signs.js';
 import { RoadData } from './roaddata.js';
 import { Link } from './link.js';
+import { icon } from './icons.js';
 import { parseShared, googleMapsNav, wazeLink, sharePlace } from './sharedplaces.js';
 import { VoiceGuide } from './voice.js';
 
@@ -548,7 +549,9 @@ function autoNightTick(first) {
 $('bNight').onclick = () => { nightMode = night ? 'day' : 'night'; try { localStorage.setItem('d3d.night', nightMode); } catch (e) { /* ignore */ } $('nightSel').value = nightMode; autoNightTick(false); };
 $('bLights').onclick = () => { st.headlights = !st.headlights; toggle('bLights', st.headlights); };
 $('bHazard').onclick = () => { st.hazard = !st.hazard; toggle('bHazard', st.hazard); };
-$('bTraffic').onclick = () => { trafficOn = !trafficOn; toggle('bTraffic', trafficOn); };
+$('bTraffic').onclick = () => { trafficOn = !trafficOn; toggle('bTraffic', trafficOn); $('bTraffic').classList.toggle('off', !trafficOn); try { localStorage.setItem('d3d.traffic', trafficOn ? '1' : '0'); } catch (e) { /* private mode */ } };
+try { if (localStorage.getItem('d3d.traffic') === '0') trafficOn = false; } catch (e) { /* private mode */ }
+toggle('bTraffic', trafficOn); $('bTraffic').classList.toggle('off', !trafficOn);
 $('bCam').onclick = () => { st.follow = !st.follow; toggle('bCam', st.follow); };
 $('bGps').onclick = () => { st.gps = !st.gps; updateGpsUi(); if (st.gps) startGps(); };
 $('bDoors').onclick = () => { st.doorTarget = st.doorTarget ? 0 : 1; toggle('bDoors', !!st.doorTarget); };
@@ -557,7 +560,7 @@ $('bRoad').onclick = () => { roadMode = roadMode === 'auto' ? 'city' : roadMode 
 $('bInfo').onclick = () => { $('credits').hidden = false; };
 $('closeCredits').onclick = () => { $('credits').hidden = true; };
 $('manualSlider').oninput = (e) => { st.speedKmh = +e.target.value; $('manualOut').textContent = e.target.value; };
-toggle('bCam', true); toggle('bTraffic', true); toggle('bGps', true);
+toggle('bCam', true); toggle('bGps', true);
 
 function updateGpsUi() {
   toggle('bGps', st.gps);
@@ -814,11 +817,11 @@ function routeFrame() {
   const man = $('maneuver');
   man.classList.toggle('hw', hw);
   if (nx) {
-    $('mArrow').textContent = ARROWS[nx.step.kind] || '↑';
+    $('mArrow').innerHTML = icon(nx.step.kind);
     $('mText').textContent = stepLabel(nx.step, hw);
     const d = Math.round(nx.dist / 10) * 10;
     $('mDist').textContent = d >= 1000 ? (d / 1000).toFixed(1) + ' km' : d + ' m';
-  } else { $('mArrow').textContent = '🏁'; $('mText').textContent = 'Destino'; $('mDist').textContent = ''; }
+  } else { $('mArrow').innerHTML = icon('ARRIVE'); $('mText').textContent = 'Destino'; $('mDist').textContent = ''; }
   // traffic ahead (card + voice) and the alternative route, if there is a faster one
   const nt = course.nextTraffic(sN);
   const traffic = nt ? { level: nt[2], dist: Math.max(0, Math.round((nt[0] - sN) / 10) * 10), len: Math.round((nt[1] - Math.max(nt[0], sN)) / 10) * 10, delayMin: Math.round(nt[3] / 60) } : null;
@@ -924,7 +927,7 @@ function renderResults() {
     const row = document.createElement('div'); row.className = 'it';
     row.innerHTML = '<span>' + icon + '</span><span class="n"></span>';
     row.querySelector('.n').textContent = p.name;
-    const shb = document.createElement('button'); shb.textContent = '↗'; shb.style.color = '#7ce0ff'; shb.onclick = (e) => { e.stopPropagation(); closeSearch(); shareDialog(p); }; row.appendChild(shb);
+    const shb = document.createElement('button'); shb.innerHTML = icon('share'); shb.style.color = '#7ce0ff'; shb.onclick = (e) => { e.stopPropagation(); closeSearch(); shareDialog(p); }; row.appendChild(shb);
     if (isFav(p)) { const eb = document.createElement('button'); eb.textContent = '✏️'; eb.onclick = (e) => { e.stopPropagation(); editFav(p); }; row.appendChild(eb); }
     if (isFav(p)) { const hb = document.createElement('button'); hb.textContent = home && samePlace(home, p) ? '🏠' : '🏡'; hb.onclick = (e) => { e.stopPropagation(); setHome(p); renderResults(); }; row.appendChild(hb); }
     const sb = document.createElement('button'); sb.textContent = isFav(p) ? '★' : '☆'; sb.onclick = (e) => { e.stopPropagation(); toggleFav(p); renderResults(); }; row.appendChild(sb);
@@ -942,6 +945,8 @@ $('q').addEventListener('input', () => {
   liveTimer = setTimeout(async () => { const res = await search(text, origin(), ttKey); if ($('q').value.trim() === text) { live = res; liveFor = text.toLowerCase(); renderResults(); } }, 350);
 });
 // --- places that arrive from / go to other apps (Google Maps share, Tesla app, Waze)
+for (const id of ['mStop', 'closeSearch', 'xSettings', 'pdX']) $(id).innerHTML = icon('x');
+$('bShare').innerHTML = icon('share');
 function placeDialog({ title, place, buttons, editable = true }) {
   const box = $('placeDialog'), nameEl = $('pdName');
   $('pdTitle').textContent = title; nameEl.value = place.name; nameEl.parentElement.hidden = !editable;
@@ -986,7 +991,7 @@ $('bShare').onclick = () => { $('settings').hidden = true; if (rt.dest) shareDia
   const qs = new URLSearchParams(location.search), shared = [qs.get('title'), qs.get('text'), qs.get('url')].filter(Boolean).join('\n');
   if (shared) { try { history.replaceState(null, '', location.pathname); } catch (e) { /* ignore */ } setTimeout(() => receiveShared(shared), 1500); }
 }
-function openSearch() { $('searchbar').hidden = false; $('hint').className = ''; $('hint').textContent = '↓ Arrastra hacia abajo para ir a casa' + (home ? '' : ' (marca 🏠 en un favorito)'); $('q').value = ''; live = []; renderResults(); setTimeout(() => $('q').focus(), 50); }
+function openSearch() { $('searchbar').hidden = false; $('hint').className = ''; $('hint').textContent = 'Arrastra hacia abajo para ir a casa' + (home ? '' : ' (marca 🏠 en un favorito)'); $('q').value = ''; live = []; renderResults(); setTimeout(() => $('q').focus(), 50); }
 function closeSearch() { $('searchbar').hidden = true; $('q').blur(); }
 $('bSearch').onclick = openSearch;
 $('closeSearch').onclick = closeSearch;
@@ -1114,10 +1119,10 @@ function updateRoadItems(d0, th0) {
   });
   // speed-camera sign in the HUD (bottom centre, blinking) + one spoken warning per camera
   const rd = $('radar');
-  if (radar && radar.d < 700) {
-    rd.hidden = false; $('radMax').textContent = radar.max > 0 ? radar.max : '!';
-    $('radDist').textContent = Math.max(0, Math.round(radar.d / 10) * 10) + ' m';
-    if (radar.d < 500 && !spokenRadars.has(radar.key)) {
+  if (radar && radar.d < 350) {
+    rd.hidden = false; $('radMax').textContent = radar.max > 0 ? radar.max : '!'; $('radMax').classList.toggle('big3', radar.max >= 100);
+    $('radDist').textContent = '📷 ' + Math.max(0, Math.round(radar.d / 10) * 10) + ' m';
+    if (radar.d < 300 && !spokenRadars.has(radar.key)) {
       if (spokenRadars.size > 200) spokenRadars.clear();
       spokenRadars.add(radar.key);
       voice.say('Radar a ' + Math.max(50, Math.round(radar.d / 50) * 50) + ' metros' + (radar.max > 0 ? ', límite ' + radar.max : ''));
@@ -1133,7 +1138,7 @@ function hudFrame() {
   if (shownLimit !== rt.limit) { shownLimit = rt.limit; $('limit').hidden = rt.limit == null; $('limit').textContent = rt.limit ?? ''; }
   const over = (rt.limit != null && st.speedKmh > rt.limit + 3) || (rt.radarMax != null && st.speedKmh > rt.radarMax + 3);
   ring.style.stroke = over ? '#ff5252' : '';
-  $('halo').classList.toggle('on', over);
+  $('halo').classList.toggle('on', rt.radarMax != null && st.speedKmh > rt.radarMax + 3);
 }
 
 // --- traffic card (colour = level) with the alternative-route button
@@ -1154,7 +1159,7 @@ function showTraffic(t, alt) {
   const title = t.level === 1 ? 'Tráfico' : t.level === 2 ? 'Tráfico denso' : 'Caravana o corte';
   $('tcTitle').textContent = title + (t.dist > 0 ? ' en ' + (t.dist >= 1000 ? (t.dist / 1000).toFixed(1) + ' km' : t.dist + ' m') : ' ahora');
   $('tcDetail').textContent = (t.len > 0 ? t.len + ' m' : '') + (t.delayMin > 0 ? ' · +' + t.delayMin + ' min' : '');
-  const b = $('tcAlt'); b.hidden = !alt; if (alt) b.textContent = 'Alternativa: −' + alt.save + ' min';
+  const b = $('tcAlt'); b.hidden = !alt; if (alt) b.textContent = 'Alternativa: -' + alt.save + ' min';
 }
 $('tcAlt').onclick = () => { const alt = bestAlt(); if (alt) { setRoute(alt.a, rt.dest, rt.demo, []); say('Ruta alternativa · ' + (alt.a.total / 1000).toFixed(1) + ' km'); } };
 

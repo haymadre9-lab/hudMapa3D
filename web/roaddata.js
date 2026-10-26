@@ -24,18 +24,18 @@ export const RoadData = {
     const b = brgDeg * Math.PI / 180, sb = Math.sin(b), cb = Math.cos(b);
     const mLat = 110540, mLon = 111320 * Math.cos(lat * Math.PI / 180);
     const out = [];
-    const test = (la, lo, maxAlong, maxCross) => {
+    const test = (la, lo, maxAlong, minCross, maxCross) => {
       if (Math.abs(la - lat) > 0.006 || Math.abs(lo - lon) > 0.009) return null;
       const dy = (la - lat) * mLat, dx = (lo - lon) * mLon;
       const along = dx * sb + dy * cb, cross = dx * cb - dy * sb;
-      return along >= 4 && along <= maxAlong && Math.abs(cross) <= maxCross ? [along, cross] : null;
+      return along >= 4 && along <= maxAlong && cross >= minCross && cross <= maxCross ? [along, cross] : null;
     };
     for (const e of this.sig) {
       const k = e[2]; if (k !== 's' && k !== 'c' && k !== 'p' && k !== 't') continue;
-      const r = test(e[0], e[1], 450, 11); if (r) out.push({ kind: k, dist: r[0], cross: r[1], max: 0, key: e[0] + ',' + e[1] });
+      const r = test(e[0], e[1], 450, -11, 11); if (r) out.push({ kind: k, dist: r[0], cross: r[1], max: 0, key: e[0] + ',' + e[1] });
     }
     for (const e of this.rad) {
-      const r = test(e.lat, e.lon, 700, 25); if (r) out.push({ kind: 'r', dist: r[0], cross: r[1], max: e.max || 0, key: e.lat + ',' + e.lon });
+      const r = test(e.lat, e.lon, 350, -6, 12);   // 350 m ahead, on our carriageway (the other direction sits more than 6 m to the left) if (r) out.push({ kind: 'r', dist: r[0], cross: r[1], max: e.max || 0, key: e.lat + ',' + e.lon });
     }
     out.sort((p, q) => p.dist - q.dist);
     return out.slice(0, 10);
