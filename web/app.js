@@ -1097,7 +1097,7 @@ function pickPosition() {
 setInterval(() => {
   if (fakeItems) return;
   const p = pickPosition();
-  itemsAt = { odo: st.odo, list: p ? RoadData.ahead(p.lat, p.lon, p.brg) : [] };
+  itemsAt = { odo: st.odo, list: course ? RoadData.aheadRoute(course, s0 + (st.odo - odo0)) : (p ? RoadData.ahead(p.lat, p.lon, p.brg) : []) };
 }, 250);
 function updateRoadItems(d0, th0) {
   const list = itemsAt.list, moved = d0 - itemsAt.odo;

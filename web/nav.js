@@ -55,7 +55,22 @@ export class Route {
     return [this.lat[i] + (this.lat[i + 1] - this.lat[i]) * t, this.lon[i] + (this.lon[i + 1] - this.lon[i]) * t, this.theta(ss) / RAD];
   }
 
-  /** Nearest point of the route to (lat, lon), searched around `hint`: [s, metresOffRoute]. */
+  /** Nearest point of the route to (la, lo) inside the stretch s0..s1: [s, metresOffRoute] or null. */
+  nearest(la, lo, s0, s1) {
+    const px = (lo - this.lon[0]) * this.mx, py = (la - this.lat[0]) * this.my;
+    let best = Infinity, bestS = 0;
+    for (let i = 0; i < this.n - 1; i++) {
+      if (this.cum[i + 1] < s0) continue;
+      if (this.cum[i] > s1) break;
+      const dx = this.x[i + 1] - this.x[i], dy = this.y[i + 1] - this.y[i], l2 = dx * dx + dy * dy;
+      const t = l2 > 0 ? Math.min(1, Math.max(0, ((px - this.x[i]) * dx + (py - this.y[i]) * dy) / l2)) : 0;
+      const d = Math.hypot(px - (this.x[i] + dx * t), py - (this.y[i] + dy * t));
+      if (d < best) { best = d; bestS = this.cum[i] + t * Math.sqrt(l2); }
+    }
+    return best === Infinity ? null : [bestS, best];
+  }
+
+  /** Nearest point of the route to (la, lo), searched around `hint`: [s, metresOffRoute]. */
   project(la, lo, hint) {
     const px = (lo - this.lon[0]) * this.mx, py = (la - this.lat[0]) * this.my;
     let best = Infinity, bestS = hint;

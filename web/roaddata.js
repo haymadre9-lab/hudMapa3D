@@ -18,6 +18,28 @@ export const RoadData = {
     this.ready = this.sig.length > 0 || this.rad.length > 0;
     return this.ready;
   },
+  /**
+   * The same, but following the ROUTE instead of a straight line from the car: on curvy city roads the straight corridor loses every
+   * sign beyond a few tens of metres. A sign counts when it is within a few metres of the route and ahead of us along it.
+   */
+  aheadRoute(route, sN) {
+    if (!this.ready) return [];
+    const p = route.pose(sN), lat = p[0], lon = p[1];
+    const out = [];
+    const near = (la, lo) => Math.abs(la - lat) <= 0.0048 && Math.abs(lo - lon) <= 0.0068;
+    const check = (la, lo, maxAlong, maxOff, kind, max, key) => {
+      if (!near(la, lo)) return;
+      const r = route.nearest(la, lo, sN - 5, sN + maxAlong + 40);
+      if (!r) return;
+      const along = r[0] - sN;
+      if (r[1] <= maxOff && along >= 4 && along <= maxAlong) out.push({ kind, dist: along, cross: 0, max, key });
+    };
+    for (const e of this.sig) { const k = e[2]; if (k === 's' || k === 'c' || k === 'p' || k === 't') check(e[0], e[1], 450, 13, k, 0, e[0] + ',' + e[1]); }
+    for (const e of this.rad) check(e.lat, e.lon, 350, 9, 'r', e.max || 0, e.lat + ',' + e.lon);   // a radar must be ON our route: the other carriageway is further away
+    out.sort((a, b) => a.dist - b.dist);
+    return out.slice(0, 10);
+  },
+
   /** Things on our road within ~450 m (radars 700 m) ahead, nearest first: {kind s|c|t|p|r, dist, cross, max, key}. */
   ahead(lat, lon, brgDeg) {
     if (!this.ready) return [];
