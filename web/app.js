@@ -274,7 +274,7 @@ function buildTesla(gltf) {
       if (!a || !c) continue;
       const ba = new THREE.Box3().setFromObject(a), bc = new THREE.Box3().setFromObject(c), sa = ba.getSize(new THREE.Vector3()), ca = ba.getCenter(new THREE.Vector3());
       const m = new THREE.Mesh(new THREE.BoxGeometry(sa.x * 0.95, Math.max(0.02, sa.y * 4), 0.012), new THREE.MeshBasicMaterial({ color: 0xffa30d, toneMapped: false }));
-      m.position.set((ca.x + bc.getCenter(new THREE.Vector3()).x) / 2, ca.y, bc.max.z + 0.006); m.visible = false; carRoot.add(m); overlayStrips[side] = m;
+      m.position.set(ca.x, ca.y, bc.max.z + 0.006); m.visible = false; carRoot.add(m); overlayStrips[side] = m;
     }
   }
 
@@ -759,7 +759,7 @@ function frame(now) {
       for (const o of overlayLamps) {
         const g = o.tag;
         if (g === 'Lens') continue;
-        const on = g === 'Tail' ? (tailOnO && !(/left/i.test(o.node.name) ? L : /right/i.test(o.node.name) ? R : false)) : g === 'Brake' ? braking : (/^DRL|^LowBeam$|^Fog$/.test(g)) ? st.headlights : /_L$/.test(g) ? L : /_R$/.test(g) ? R : false;
+        const on = g === 'Tail' ? (tailOnO && !(/lightsl/i.test(o.node.name) ? L : /lightsr/i.test(o.node.name) ? R : false)) : g === 'Brake' ? braking : (/^DRL|^LowBeam$|^Fog$/.test(g)) ? st.headlights : /_L$/.test(g) ? L : /_R$/.test(g) ? R : false;
         o.node.visible = on; if (on) { any = true; if (o.base) o.base.visible = false; }
       }
       if (overlayStrips.L) overlayStrips.L.visible = L;
