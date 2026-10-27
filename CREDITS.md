@@ -12,7 +12,6 @@ Cambios hechos por este proyecto: escalado y recentrado de los modelos; el coche
 |---|---|---|---|
 | `cars/tesla_model3.glb` | Tesla 2018 Model 3 (versión con luces e intermitentes mejorados, modificada por el autor del proyecto) | Ameer Studio (CC BY 4.0) | https://sketchfab.com/3d-models/tesla-2018-model-3-5ef9b845aaf44203b6d04e2c677e444f |
 | `cars/opel_gt.glb` | Opel GT Retopo | systmh (**CC BY-NC-SA 4.0**: solo uso no comercial, y compartir igual) | https://sketchfab.com/3d-models/opel-gt-retopo-badcab3c8a3d42359c8416db8a7427fe |
-| `cars/porsche_911_gt3.glb` | Porsche 911 GT3 (modelo aportado por el usuario; autor y licencia **por confirmar**) | — | — |
 | `cars/tesla_cybertruck.glb` | Tesla Cybertruck low poly | Igor Tretyakov (CC BY 4.0) | https://sketchfab.com/3d-models/tesla-cybertruk-low-poly-e3558b991e75418cb45624fab4d980e5 |
 | `cars/ford_mustang_1965.glb` | Ford Mustang 1965 | Pooya_dh (**CC BY-NC 4.0**) | https://sketchfab.com/3d-models/ford-mustang-1965-5f4e3965f79540a9888b5d05acea5943 |
 | `cars/xiaomi_su7.glb` | 2024 Xiaomi SU7 Max | Ddiaz Design (**CC BY-NC-SA 4.0**) | https://sketchfab.com/3d-models/2024-xiaomi-su7-max-db30dd1e254243b4ba002c6ce65df052 |
@@ -53,7 +52,6 @@ los modelos se usan solo como contenido de demostración.
 | Archivo (web/assets) | Modelo | Autor y licencia | Enlace |
 |---|---|---|---|
 | `cars/modelo3.glb` | Tesla Model 3 | David_Holiday (CC BY 4.0) | https://sketchfab.com/3d-models/tesla-model-3-123c10f376ec4f18b93c73afc382808b |
-| `cars/porsche_911_gt3.glb` | Porsche 911 GT3 (autor y licencia **por confirmar**) | — | — |
 | `cars/tesla_cybertruck.glb` | Tesla Cybertruck low poly | Igor Tretyakov (CC BY 4.0) | https://sketchfab.com/3d-models/tesla-cybertruk-low-poly-e3558b991e75418cb45624fab4d980e5 |
 | `cars/tesla_model_y.glb` | 2025 Tesla Model Y | BloxBloger (**CC BY-NC 4.0**: solo uso no comercial) | https://sketchfab.com/3d-models/2025-tesla-model-y-619601e7800d418da5922c4fa7833f74 |
 | `traffic/*.glb` | Generic passenger car pack | Comrade1280 (CC BY 4.0) | https://sketchfab.com/3d-models/generic-passenger-car-pack-20f9af9b8a404d5cb022ac6fe87f21f5 |

@@ -183,6 +183,8 @@ const bodyMats = [];
 const headSpots = [];
 let carReady = false;
 let stripRig = null;           // thin light strips drawn on the original Model 3's lamp clusters
+const overlayStrips = { L: null, R: null };     // amber strips on the rear lamp housings (the real rear turn plates sit inside the solid housing)
+const overlayCluster = {};     // solid rear housings: hidden while their side's turn lamp (inside them) blinks
 const overlayLamps = [];       // models that ship their own "__ON_<tag>" light meshes: shown / hidden by tag
 const doorPivots = [];
 
@@ -204,6 +206,9 @@ function buildTesla(gltf) {
   overlayLamps.length = 0;
   { const found = [];
     model.traverse((o) => { const m = /__ON_(.+)$/.exec(o.name); const r = /^RepetidorLateral_([LR])_ON$/.exec(o.name); if (m || r) found.push({ node: o, tag: m ? m[1] : 'Repeater_' + r[1] }); });
+    overlayCluster.L = model.getObjectByName(THREE.PropertyBinding.sanitizeNodeName('rear_lightsl_left rear light_0')) || null;
+    overlayCluster.R = model.getObjectByName(THREE.PropertyBinding.sanitizeNodeName('rear_lightsr_right rear light_0')) || null;
+    overlayCluster.B = model.getObjectByName(THREE.PropertyBinding.sanitizeNodeName('rear_lights_right rear light_0')) || null;
     for (const f of found) {
       f.node.visible = false;
       const bn = f.tag.startsWith('Repeater_') ? 'RepetidorLateral_' + f.tag[9] + '_apagado' : f.node.name.replace(/__ON_.+$/, '');
@@ -262,6 +267,17 @@ function buildTesla(gltf) {
     doorPivots.push({ pivot, sign: c.x >= 0 ? 1 : -1 });
   }
 
+  if (overlayLamps.length) {
+  model.updateMatrixWorld(true); carInner.updateMatrixWorld(true);
+    for (const [side, nm, cl] of [['L', 'light_turn_lr_boot_indicator lr_0', 'rear_lightsl_left rear light_0'], ['R', 'light_turn_rr_boot_indicator rr_0', 'rear_lightsr_right rear light_0']]) {
+      const a = model.getObjectByName(THREE.PropertyBinding.sanitizeNodeName(nm)), c = model.getObjectByName(THREE.PropertyBinding.sanitizeNodeName(cl));
+      if (!a || !c) continue;
+      const ba = new THREE.Box3().setFromObject(a), bc = new THREE.Box3().setFromObject(c), sa = ba.getSize(new THREE.Vector3()), ca = ba.getCenter(new THREE.Vector3());
+      const m = new THREE.Mesh(new THREE.BoxGeometry(sa.x * 0.95, Math.max(0.02, sa.y * 4), 0.012), new THREE.MeshBasicMaterial({ color: 0xffa30d, toneMapped: false }));
+      m.position.set((ca.x + bc.getCenter(new THREE.Vector3()).x) / 2, ca.y, bc.max.z + 0.006); m.visible = false; carRoot.add(m); overlayStrips[side] = m;
+    }
+  }
+
   // Lights of the original Model 3: its lamp materials share one texture atlas and the clusters are solid blocks, so lighting the material lights
   // the whole housing. Instead draw thin glowing strips on the clusters: red at the back (amber while that side's signal blinks), white at the front.
   if (!overlayLamps.length) {
@@ -307,7 +323,6 @@ const CARS = [
   { id: 'modelo3', name: 'Model 3 (ligero)', file: 'assets/cars/modelo3.glb', len: 4.69, rot: 180, body: /^car_paint$/i },
   { id: 'modely', name: 'Tesla Model Y', file: 'assets/cars/tesla_model_y.glb', len: 4.75, rot: 180, body: /^Material_2125767099$/ },
   { id: 'cybertruck', name: 'Tesla Cybertruck', file: 'assets/cars/tesla_cybertruck.glb', len: 5.7, rot: 180 },
-  { id: 'porsche', name: 'Porsche 911 GT3', file: 'assets/cars/porsche_911_gt3.glb', len: 4.57, rot: 180, body: /^body_paint$/ },
   { id: 'su7', name: 'Xiaomi SU7', file: 'assets/cars/xiaomi_su7.glb', len: 5.0, rot: 180, body: /CarPaint_SU7_Base1$/ },
 ];
 let carToken = 0;
@@ -315,7 +330,7 @@ let carToken = 0;
 function clearCar() {
   carReady = false;
   carRoot.clear(); carInner.clear(); carRoot.add(carInner); carInner.scale.setScalar(1); carInner.position.set(0, 0, 0);
-  stripRig = null; overlayLamps.length = 0; wheelPairs.length = 0; doorPivots.length = 0; bodyMats.length = 0; headSpots.length = 0;
+  stripRig = null; overlayStrips.L = overlayStrips.R = null; overlayLamps.length = 0; wheelPairs.length = 0; doorPivots.length = 0; bodyMats.length = 0; headSpots.length = 0;
   for (const k of Object.keys(lampMats)) lampMats[k].length = 0;
   origColors.clear();
 }
@@ -744,9 +759,14 @@ function frame(now) {
       for (const o of overlayLamps) {
         const g = o.tag;
         if (g === 'Lens') continue;
-        const on = g === 'Tail' ? tailOnO : g === 'Brake' ? braking : (/^DRL|^LowBeam$|^Fog$/.test(g)) ? st.headlights : /_L$/.test(g) ? L : /_R$/.test(g) ? R : false;
+        const on = g === 'Tail' ? (tailOnO && !(/left/i.test(o.node.name) ? L : /right/i.test(o.node.name) ? R : false)) : g === 'Brake' ? braking : (/^DRL|^LowBeam$|^Fog$/.test(g)) ? st.headlights : /_L$/.test(g) ? L : /_R$/.test(g) ? R : false;
         o.node.visible = on; if (on) { any = true; if (o.base) o.base.visible = false; }
       }
+      if (overlayStrips.L) overlayStrips.L.visible = L;
+      if (overlayStrips.R) overlayStrips.R.visible = R;
+      if (overlayCluster.L && L) overlayCluster.L.visible = false;
+      if (overlayCluster.R && R) overlayCluster.R.visible = false;
+      if (overlayCluster.B && (L || R)) overlayCluster.B.visible = false;      // the full-width bar sits over both lamps
       for (const o of overlayLamps) if (o.tag === 'Lens') { o.node.visible = any; if (o.base) o.base.visible = !any; }   // the red cover turns clear while a lamp shines through it
     }
     if (!stripRig && !overlayLamps.length) lamp(lampMats.head, st.headlights ? 1 : 0, WHITE, 6);
