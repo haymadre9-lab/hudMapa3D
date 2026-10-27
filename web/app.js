@@ -183,11 +183,13 @@ const bodyMats = [];
 const headSpots = [];
 let carReady = false;
 let stripRig = null;           // thin light strips drawn on the original Model 3's lamp clusters
+const overlayLamps = [];       // models that ship their own "__ON_<tag>" light meshes: shown / hidden by tag
 const doorPivots = [];
 
 function classifyMaterial(m) {
   const n = (m.name || '').toLowerCase();
   if (/^primary/.test(n)) bodyMats.push(m);
+  if (overlayLamps.length) return;
   if (/left.{0,6}rear.?light/.test(n)) { m.userData.keepMap = true; lampMats.tailL.push(m); }          // the visible rear clusters double as turn signals
   else if (/right.{0,6}rear.?light/.test(n)) { m.userData.keepMap = true; lampMats.tailR.push(m); }
   else if (/indicator/.test(n)) (/_l/.test(n) ? lampMats.sigL : lampMats.sigR).push(m);
@@ -198,8 +200,18 @@ function classifyMaterial(m) {
 
 function buildTesla(gltf) {
   const model = gltf.scene;
+  // Tesla with its own light meshes (hidden until their tag is needed): no material tinting, no strips
+  overlayLamps.length = 0;
+  { const found = [];
+    model.traverse((o) => { const m = /__ON_(.+)$/.exec(o.name); const r = /^RepetidorLateral_([LR])_ON$/.exec(o.name); if (m || r) found.push({ node: o, tag: m ? m[1] : 'Repeater_' + r[1] }); });
+    for (const f of found) {
+      f.node.visible = false;
+      const bn = f.tag.startsWith('Repeater_') ? 'RepetidorLateral_' + f.tag[9] + '_apagado' : f.node.name.replace(/__ON_.+$/, '');
+      f.base = model.getObjectByName(bn) || null;      // the unlit version of the same part: hidden while the lit one shows
+      overlayLamps.push(f);
+    } }
   // the full-width rear light bar shares its material with the right rear cluster: give it its own so a right-turn signal lights only the cluster
-  { model.updateMatrixWorld(true); const cand = [];
+  if (!overlayLamps.length) { model.updateMatrixWorld(true); const cand = [];
     model.traverse((o) => { if (o.isMesh && o.material && o.material.name === 'right_rear_light') cand.push([o, new THREE.Box3().setFromObject(o).getSize(new THREE.Vector3()).x]); });
     if (cand.length > 1) { cand.sort((p, q) => q[1] - p[1]); const bar = cand[0][0]; bar.material = bar.material.clone(); bar.material.name = 'rear_light_strip'; } }
   // drop the ground-reflection / fake shadow planes baked into the model
@@ -252,7 +264,7 @@ function buildTesla(gltf) {
 
   // Lights of the original Model 3: its lamp materials share one texture atlas and the clusters are solid blocks, so lighting the material lights
   // the whole housing. Instead draw thin glowing strips on the clusters: red at the back (amber while that side's signal blinks), white at the front.
-  {
+  if (!overlayLamps.length) {
     model.updateMatrixWorld(true);
     const found = {};
     model.traverse((o) => {
@@ -291,12 +303,11 @@ const loader = new GLTFLoader().setMeshoptDecoder(MeshoptDecoder);
 // Selectable main cars. Tesla (the original) has wheels that spin, doors that open and lamps by name; the others are placed generically.
 // len = real length in metres, rot = extra yaw (deg) so the front points down the road.
 const CARS = [
-  { id: 'tesla', name: 'Tesla Model 3 (original)', file: 'assets/tesla_model3.glb' },
+  { id: 'tesla', name: 'Tesla Model 3 (con luces)', file: 'assets/tesla_model3.glb' },
   { id: 'modelo3', name: 'Model 3 (ligero)', file: 'assets/cars/modelo3.glb', len: 4.69, rot: 180, body: /^car_paint$/i },
   { id: 'modely', name: 'Tesla Model Y', file: 'assets/cars/tesla_model_y.glb', len: 4.75, rot: 180, body: /^Material_2125767099$/ },
-  { id: 'opel', name: 'Opel GT', file: 'assets/cars/opel_gt.glb', len: 4.1, rot: 180, body: /^bodyMAT$/ },
-  { id: 'c130', name: 'Datsun 240Z (130)', file: 'assets/cars/car130.glb', len: 4.2, rot: 180, body: /^body[12]?$/ },
-  { id: 'mercedes', name: 'Mercedes Clase E (W212)', file: 'assets/cars/mercedes_e_class.glb', len: 4.87, rot: 0, body: /^mat_body$/ },
+  { id: 'cybertruck', name: 'Tesla Cybertruck', file: 'assets/cars/tesla_cybertruck.glb', len: 5.7, rot: 180 },
+  { id: 'porsche', name: 'Porsche 911 GT3', file: 'assets/cars/porsche_911_gt3.glb', len: 4.57, rot: 180, body: /^body_paint$/ },
   { id: 'su7', name: 'Xiaomi SU7', file: 'assets/cars/xiaomi_su7.glb', len: 5.0, rot: 180, body: /CarPaint_SU7_Base1$/ },
 ];
 let carToken = 0;
@@ -304,7 +315,7 @@ let carToken = 0;
 function clearCar() {
   carReady = false;
   carRoot.clear(); carInner.clear(); carRoot.add(carInner); carInner.scale.setScalar(1); carInner.position.set(0, 0, 0);
-  stripRig = null; wheelPairs.length = 0; doorPivots.length = 0; bodyMats.length = 0; headSpots.length = 0;
+  stripRig = null; overlayLamps.length = 0; wheelPairs.length = 0; doorPivots.length = 0; bodyMats.length = 0; headSpots.length = 0;
   for (const k of Object.keys(lampMats)) lampMats[k].length = 0;
   origColors.clear();
 }
@@ -680,7 +691,14 @@ function frame(now) {
   st.decel += (dv - st.decel) * Math.min(1, dt * 4); st.prevSpeed = st.speedKmh;
   st.brakeHold = st.speedKmh > 3 && st.decel > 6 ? 0.5 : Math.max(0, st.brakeHold - dt);
   const braking = st.brakeHold > 0;
-  st.park += ((st.speedKmh < 1.5 ? 1 : 0) - st.park) * Math.min(1, dt * 1.4);
+  // Stopped = frozen exactly as it is. Only at the destination, after more than 10 s stopped, the car pulls onto the shoulder (hazards + doors open)
+  // and goes back onto the road as soon as it moves again.
+  {
+    const sEnd = course ? course.total - (s0 + (st.odo - odo0)) : 1e9;
+    if (st.speedKmh > 8 || sEnd > 40) { st.stopT = 0; st.parkWant = 0; }
+    else if (st.speedKmh < 1) { st.stopT = (st.stopT || 0) + dt; if (st.stopT > 10) st.parkWant = 1; }
+    st.park += ((st.parkWant || 0) - st.park) * Math.min(1, dt * 0.7);
+  }
   const moving = st.speedKmh > 3 ? 1 : 0;
   const pitch = (-Math.min(1, Math.max(0, st.decel) / 18) * 2.6 + Math.min(1, Math.max(0, -st.decel) / 14) * 1.4) * moving;
 
@@ -697,8 +715,8 @@ function frame(now) {
     const kap = kappa(st.odo);
     const steer = clamp(-kap * 450, -9, 9), lean = clamp(kap * v * 25, -4, 4);
     const rad = Math.PI / 180;
-    carRoot.rotation.set(pitch * rad, (steer - 8 * st.park) * rad, lean * rad, 'YXZ');
-    carRoot.position.set(0.55 * st.park, 0, 0);
+    carRoot.rotation.set(pitch * rad, (steer - 6 * st.park) * rad, lean * rad, 'YXZ');
+    carRoot.position.set(3.4 * st.park, 0, 0);      // 3.4 m to the right: clear of the right edge line
     st.wheelAngle += v / 0.34 * dt;
     for (const w of wheelPairs) w.rotation.x = -st.wheelAngle;
     st.door += (((st.doorTarget || st.autoDoor) ? 1 : 0) - st.door) * Math.min(1, dt * 4);
@@ -714,15 +732,26 @@ function frame(now) {
         if (nx.dist < lim) { const dir = { L: -1, SL: -1, U: -1, R: 1, SR: 1, X: 1 }[nx.step.kind] || 0; if (dir) { st.sigHold = dir; st.sigUntil = nx.step.offset + 25; } }
       }
       if (st.sigHold && sNow < st.sigUntil) { autoL = st.sigHold < 0; autoR = st.sigHold > 0; } else st.sigHold = 0;
-      if (course.total - sNow < 25 && st.speedKmh < 3) st.autoDoor = true;
     } else st.sigHold = 0;
-    if (!course || st.speedKmh > 8) st.autoDoor = false;
+    st.autoDoor = !!st.parkWant && st.park > 0.6;
     if (st.speedKmh > 30 && st.decel > 25) st.hazUntil = now + 4000;
-    autoHaz = now < (st.hazUntil || 0) || (!!course && rt.traffic && rt.traffic.level === 3 && rt.traffic.dist <= 30 && st.speedKmh < 25);
+    autoHaz = !!st.parkWant || now < (st.hazUntil || 0) || (!!course && rt.traffic && rt.traffic.level === 3 && rt.traffic.dist <= 30 && st.speedKmh < 25);
     const blink = Math.floor(now / 625) % 2 === 0;
-    if (!stripRig) lamp(lampMats.head, st.headlights ? 1 : 0, WHITE, 6);
-    if (!stripRig) lamp(lampMats.tail, (st.headlights || braking) ? 1 : 0, RED, 4);
-    if (!stripRig) lamp(lampMats.brake, braking ? 1.5 : (st.headlights ? 0.5 : 0), RED, 4);
+    if (overlayLamps.length) {
+      const tailOnO = st.headlights || braking, L = (st.hazard || autoHaz || autoL) && blink, R = (st.hazard || autoHaz || autoR) && blink;
+      let any = false;
+      for (const o of overlayLamps) if (o.base) o.base.visible = true;
+      for (const o of overlayLamps) {
+        const g = o.tag;
+        if (g === 'Lens') continue;
+        const on = g === 'Tail' ? tailOnO : g === 'Brake' ? braking : (/^DRL|^LowBeam$|^Fog$/.test(g)) ? st.headlights : /_L$/.test(g) ? L : /_R$/.test(g) ? R : false;
+        o.node.visible = on; if (on) { any = true; if (o.base) o.base.visible = false; }
+      }
+      for (const o of overlayLamps) if (o.tag === 'Lens') { o.node.visible = any; if (o.base) o.base.visible = !any; }   // the red cover turns clear while a lamp shines through it
+    }
+    if (!stripRig && !overlayLamps.length) lamp(lampMats.head, st.headlights ? 1 : 0, WHITE, 6);
+    if (!stripRig && !overlayLamps.length) lamp(lampMats.tail, (st.headlights || braking) ? 1 : 0, RED, 4);
+    if (!stripRig && !overlayLamps.length) lamp(lampMats.brake, braking ? 1.5 : (st.headlights ? 0.5 : 0), RED, 4);
     const tailOn = st.headlights || braking, sigLon = (st.hazard || autoHaz || autoL) && blink, sigRon = (st.hazard || autoHaz || autoR) && blink;
     if (stripRig) {
       for (const [side, on] of [['left', sigLon], ['right', sigRon]]) {
@@ -732,9 +761,9 @@ function frame(now) {
         else { m.visible = tailOn; m.material.color.setRGB(1, braking ? 0.15 : 0.1, 0.06); }
       }
       for (const m of stripRig.front) m.visible = st.headlights;
-    } else { sideLamp(lampMats.tailL, sigLon, tailOn); sideLamp(lampMats.tailR, sigRon, tailOn); }
-    if (!stripRig) lamp(lampMats.sigL, sigLon ? 1 : 0, AMBER, 4);
-    if (!stripRig) lamp(lampMats.sigR, sigRon ? 1 : 0, AMBER, 4);
+    } else if (!overlayLamps.length) { sideLamp(lampMats.tailL, sigLon, tailOn); sideLamp(lampMats.tailR, sigRon, tailOn); }
+    if (!stripRig && !overlayLamps.length) lamp(lampMats.sigL, sigLon ? 1 : 0, AMBER, 4);
+    if (!stripRig && !overlayLamps.length) lamp(lampMats.sigR, sigRon ? 1 : 0, AMBER, 4);
     for (const sp of headSpots) sp.intensity = st.headlights ? (night ? 250 : 60) : 0;
   }
 
@@ -1019,6 +1048,8 @@ $('bSettings').onclick = () => { $('settings').hidden = false; };
 $('xSettings').onclick = () => { $('settings').hidden = true; };
 $('closeSettings').onclick = () => { if ($('linkCode').value.trim() !== Link.code) Link.setCode($('linkCode').value); ttKey = $('ttKey').value.trim(); store.set('tomtom', ttKey); $('settings').hidden = true; };
 window.d3d = { testRoute: () => { const o = origin() || { lat: 43.263, lon: -2.935 }; const r = testRoute(o.lat, o.lon); setRoute(r, null, true, [testAlternative(r)]); rt.limit = 90; say('Ruta de prueba'); }, clearRoute, voice: null,
+  jump: (m) => { st.odo += m; }, set: (k, v) => { st[k] = v; },
+  state: () => ({ speed: st.speedKmh, park: st.park, stopT: st.stopT, want: st.parkWant, door: st.door, rem: course ? course.total - (s0 + st.odo - odo0) : null }),
   testSigns: (k = 1) => { fakeItems = true; itemsAt = { odo: st.odo, list: [{ kind: 'p', dist: 60 * k, max: 0, key: 'a' }, { kind: 's', dist: 90 * k, max: 0, key: 'b' }, { kind: 'c', dist: 130 * k, max: 0, key: 'c' }, { kind: 't', dist: 170 * k, max: 0, key: 'd' }, { kind: 'r', dist: 300 * k, max: 80, key: 'e' }] }; } };
 $('bTest').onclick = () => { $('settings').hidden = true; window.d3d.testRoute(); };
 $('bClear').onclick = () => { $('settings').hidden = true; clearRoute(); };
