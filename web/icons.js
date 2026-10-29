@@ -11,4 +11,21 @@ const ICONS = {
   share: svg(UP, 45),
 };
 
-export const icon = (name) => ICONS[name] || ICONS.S;
+/** Where a roundabout is left, clockwise from straight on: the real angle when the router gave it, else by exit number in quarters (1st right, 2nd straight, 3rd left, the rest = back the way we came). */
+export const rbAngle = (step) => (step && step.exitAngle != null) ? step.exitAngle : ({ 1: 90, 2: 0, 3: 270 }[step && step.exitNo] ?? (step && step.exitNo ? 180 : 0));
+
+/** Turning roundabout: the ring spins, the exit arrow sits where the exit is and the exit number is inside in black. */
+function roundabout(step) {
+  const ang = rbAngle(step), ad = Math.abs(ang - 180) < 25 ? 150 : ang;       // a U-turn is drawn beside the way in
+  const pt = (r, deg) => [24 + r * Math.sin(deg * Math.PI / 180), 24 - r * Math.cos(deg * Math.PI / 180)].map((v) => v.toFixed(1));
+  const [x0, y0] = pt(10, ad), [x1, y1] = pt(21, ad), [hx1, hy1] = pt(21 - 0, ad);
+  const [ax, ay] = pt(15, ad + 28), [bx, by] = pt(15, ad - 28), [cx, cy] = pt(22.5, ad);
+  const num = step && step.exitNo > 0 ? '<text x="24" y="29.4" text-anchor="middle" font-size="14" font-weight="800" font-family="system-ui,Arial,sans-serif" fill="#000" stroke="none">' + step.exitNo + '</text>' : '';
+  return '<svg class="rb" viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
+    + '<circle cx="24" cy="24" r="12" stroke-dasharray="19 6.1" stroke-width="3.2"><animate attributeName="stroke-dashoffset" from="0" to="75.4" dur="3.2s" repeatCount="indefinite"/></circle>'
+    + '<circle cx="24" cy="24" r="9" fill="#fff" stroke="none"/>' + num
+    + '<path d="M24 46V36"/>'
+    + '<path d="M' + x0 + ' ' + y0 + 'L' + cx + ' ' + cy + '"/><path d="M' + ax + ' ' + ay + 'L' + cx + ' ' + cy + 'L' + bx + ' ' + by + '"/></svg>';
+}
+
+export const icon = (name, step) => (name === 'RB' && step) ? roundabout(step) : (ICONS[name] || ICONS.S);

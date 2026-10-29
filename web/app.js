@@ -866,7 +866,7 @@ function routeFrame() {
   const man = $('maneuver');
   man.classList.toggle('hw', hw);
   if (nx) {
-    $('mArrow').innerHTML = icon(nx.step.kind);
+    $('mArrow').innerHTML = icon(nx.step.kind, nx.step);
     $('mText').textContent = stepLabel(nx.step, hw);
     const d = Math.round(nx.dist / 10) * 10;
     $('mDist').textContent = d >= 1000 ? (d / 1000).toFixed(1) + ' km' : d + ' m';

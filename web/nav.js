@@ -215,12 +215,16 @@ async function viaOsrm(from, to) {
   const r = j.routes[0];
   const pts = r.geometry.coordinates.map((c) => [c[1], c[0]]);
   const steps = [], mw = [];
-  let acc = 0;
+  let acc = 0, rbStep = null, rbIn = 0;
   for (const st of r.legs[0].steps) {
     const man = st.maneuver || {};
+    // where the roundabout is left, relative to the way in (clockwise from straight on), when the router tells the bearings
+    if (rbStep && /exit (roundabout|rotary)/.test(man.type || '') && man.bearing_after != null) { rbStep.exitAngle = Math.round((((man.bearing_after - rbIn) % 360) + 360) % 360); rbStep = null; }
     if (man.type !== 'depart') {
       const kind = man.type === 'arrive' ? 'ARRIVE' : (/roundabout|rotary/.test(man.type) ? 'RB' : man.type === 'off ramp' ? 'X' : kindOf(man.modifier));
-      steps.push({ offset: acc, kind, text: (st.destinations || st.name || st.ref || '').replace(/, /g, ' · '), ref: st.ref || null, exitNo: man.exit || parseInt(st.exits) || 0 });
+      const stp = { offset: acc, kind, text: (st.destinations || st.name || st.ref || '').replace(/, /g, ' · '), ref: st.ref || null, exitNo: man.exit || parseInt(st.exits) || 0 };
+      if (kind === 'RB' && man.bearing_before != null) { rbStep = stp; rbIn = man.bearing_before; }
+      steps.push(stp);
     }
     const mwy = /^(A-|AP-|E-)/.test(st.ref || '') || (st.intersections || []).some((i) => (i.classes || []).includes('motorway'));
     if (mwy) { const last = mw[mw.length - 1]; if (last && Math.abs(last[1] - acc) < 1) last[1] = acc + st.distance; else mw.push([acc, acc + st.distance]); }
