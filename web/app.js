@@ -692,10 +692,15 @@ function skyPos() {
   if (st.pos) return [st.pos.lat, st.pos.lon];
   const lp = store.get('lastpos', null); return lp ? [lp.lat, lp.lon] : [43.26, -2.93];
 }
+// Para probar el cielo por la dirección: ?cielo=atardecer (auto | dia | atardecer | noche) y ?nubes=0.7 (0 a 1, solo con clima Real)
+const urlQ = new URLSearchParams(location.search);
+const urlSky = ['auto', 'dia', 'atardecer', 'noche'].includes(urlQ.get('cielo')) ? urlQ.get('cielo') : null;
+const urlNubes = urlQ.get('nubes') === null ? null : clamp(+urlQ.get('nubes') || 0, 0, 1);
 function syncSky() {
   if (!cc) return;
-  cc.ponerCielo(nightMode === 'auto' ? 'auto' : nightMode === 'night' ? 'noche' : 'dia');
+  cc.ponerCielo(urlSky || (nightMode === 'auto' ? 'auto' : nightMode === 'night' ? 'noche' : 'dia'));
   cc.ponerTiempo(wxMode === 'auto' ? 'real' : (WXSKY[wxMode] || 'despejado'));
+  if (urlNubes !== null && wxMode === 'auto') cc.ponerMet({ nubes: urlNubes });
   const P = cc.paleta(); skyEl.style.background = P.fog; if (scene.fog) scene.fog.color.set(P.fog);
 }
 if (window.CieloClima) {
@@ -703,7 +708,7 @@ if (window.CieloClima) {
     contenedor: skyEl, horizonteY: horizonY, posicion: skyPos,
     persistir: false,          // tus ajustes (d3d.night / d3d.wx) son la fuente de verdad
     particulas: false,         // la lluvia y la nieve ya son partículas 3D de la escena
-    cielo: nightMode === 'auto' ? 'auto' : nightMode === 'night' ? 'noche' : 'dia',
+    cielo: urlSky || (nightMode === 'auto' ? 'auto' : nightMode === 'night' ? 'noche' : 'dia'),
     tiempo: wxMode === 'auto' ? 'real' : (WXSKY[wxMode] || 'despejado'),
     noche: { sky: '#070b18', hor: '#16213f', fog: '#070b18' },      // conserva el azul oscuro de la noche de D3D
     alCambiar: (P, s) => {
@@ -729,7 +734,7 @@ let last = performance.now(), frames = 0, fpsT = last;
 function frame(now) {
   requestAnimationFrame(frame);
   const dt = Math.min(0.1, (now - last) / 1000); last = now;
-  frames++; if (now - fpsT >= 1000) { $('fps').textContent = frames + ' fps'; frames = 0; fpsT = now; }
+  frames++; if (now - fpsT >= 1000) { $('fps').textContent = frames + ' fps' + (cc ? ' · cielo ' + cc.estado().textoCielo.toLowerCase() : ''); frames = 0; fpsT = now; }
 
   // speed: GPS (smoothed) or the manual slider
   if (st.gps && st.gpsOk) {

@@ -4,4 +4,6 @@
   <path d="M33.2 74.8A29 29 0 1 1 74.8 74.8" fill="none" stroke="#4fc3f7" stroke-width="5" stroke-linecap="round"/>
   <path d="M54 32 72 76H63.5L54 52 44.5 76H36Z" fill="#fff"/>
   <rect x="52" y="60" width="4" height="8" fill="#4fc3f7"/>
+  <rect x="37.1" y="81.8" width="33.8" height="11.4" rx="5.7" fill="#ffb02e"/>
+  <text x="54" y="90.2" text-anchor="middle" font-family="Arial,Helvetica,sans-serif" font-weight="700" font-size="7.6" fill="#0a1530">WEB</text>
 </svg>

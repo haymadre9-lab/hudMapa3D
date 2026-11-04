@@ -1,6 +1,6 @@
 {
-  "name": "D3D Clone",
-  "short_name": "D3D Clone",
+  "name": "D3D Clone Web",
+  "short_name": "D3D Web",
   "description": "Visor 3D de conducción: carretera, coche y velocidad por GPS",
   "start_url": "./",
   "scope": "./",
