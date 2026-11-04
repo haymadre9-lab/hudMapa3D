@@ -27,7 +27,8 @@ const hash = (i, k) => { let h = (i * 73856093) ^ (k * 19349663); h = Math.imul(
 
 // ------------------------------------------------------------------ renderer / scene
 const canvas = $('gl');
-const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true, powerPreference: 'high-performance' });
+renderer.setClearColor(0x000000, 0);           // transparente: el cielo con nubes (cielo.js) va detrás del canvas
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.shadowMap.enabled = false;
@@ -562,6 +563,7 @@ function syncAutoLights(first) {
   autoLightsWanted = want; st.headlights = want; toggle('bLights', want);
 }
 function autoNightTick(first) {
+  syncSky();
   if (nightMode === 'auto') {
     let lat = 43.26, lon = -2.93;
     if (st.pos) { lat = st.pos.lat; lon = st.pos.lon; } else { const lp = store.get('lastpos', null); if (lp) { lat = lp.lat; lon = lp.lon; } }
@@ -644,6 +646,7 @@ function setWeather(w) {
 /** Real weather at our position (Open-Meteo, no key). */
 async function refreshWeather() {
   if (wxMode !== 'auto') return;
+  if (cc) { cc.refrescar(); return; }          // cielo.js pide el tiempo (con nubes) y nos lo devuelve en alCambiar; lo de abajo solo si cielo.js no cargó
   let lat = 43.26, lon = -2.93;
   if (st.pos) { lat = st.pos.lat; lon = st.pos.lon; } else { const lp = store.get('lastpos', null); if (lp) { lat = lp.lat; lon = lp.lon; } }
   try {
@@ -657,27 +660,66 @@ async function refreshWeather() {
 }
 setTimeout(() => {
   const sel = $('wxSel'); sel.value = wxMode;
-  sel.onchange = () => { wxMode = sel.value; try { localStorage.setItem('d3d.wx', wxMode); } catch (e) { /* ignore */ } if (wxMode === 'auto') refreshWeather(); else setWeather(wxMode); };
+  sel.onchange = () => { wxMode = sel.value; try { localStorage.setItem('d3d.wx', wxMode); } catch (e) { /* ignore */ } if (wxMode === 'auto') refreshWeather(); else setWeather(wxMode); syncSky(); };
   const urlWx = new URLSearchParams(location.search).get('wx');
   if (urlWx) { wxMode = urlWx; sel.value = urlWx; }
   if (wxMode === 'auto') { refreshWeather(); setInterval(refreshWeather, 600000); } else setWeather(wxMode);
+  syncSky();
 }, 3000);
+let cc = null;      // cielo y clima (cielo.js)
 let applyTheme = function () {
   const t = night ? NIGHT : DAY;
-  scene.background = new THREE.Color(t.bg);
-  scene.fog = new THREE.Fog(t.fog, ...(FOG_RANGE[wx] || FOG_RANGE.clear));
+  scene.background = null;                       // el cielo va detrás del canvas transparente
+  scene.fog = new THREE.Fog(cc ? cc.paleta().fog : t.fog, ...(FOG_RANGE[wx] || FOG_RANGE.clear));
   sun.intensity = t.sun; hemi.intensity = t.hemi; scene.environmentIntensity = t.env;
   asphalt.color.setHex(t.asphalt); grassMat.color.setHex(t.grass);
   TINTS.forEach((c, i) => roadMats[i + 1].color.setHex(c).multiplyScalar(night ? 0.45 : 1));
   $('bNight').textContent = night ? '☀️' : '🌙';
+  syncSky();
 };
 applyTheme();
+
+// ------------------------------------------------------------------ cielo con nubes y clima (cielo.js, mismo motor que AutoBoard Next)
+// Tu día/noche (nightMode) y tu clima (wxMode / wx) mandan; el cielo solo los dibuja. En modo automático el tiempo real lo pide cielo.js (con % de nubes) y nos dice si llueve, nieva o hay niebla.
+const skyEl = document.createElement('div'); skyEl.id = 'sky'; document.body.insertBefore(skyEl, canvas);
+const WXSKY = { clear: 'despejado', rain: 'lluvia', snow: 'nieve', fog: 'niebla' };
+const horizonVec = new THREE.Vector3();
+function horizonY() {            // píxel (desde arriba) donde la cámara ve el horizonte
+  camera.getWorldDirection(horizonVec); horizonVec.y = 0; horizonVec.normalize().multiplyScalar(5000).add(camera.position); horizonVec.y = camera.position.y;
+  horizonVec.project(camera); return (1 - horizonVec.y) / 2 * window.innerHeight;
+}
+function skyPos() {
+  if (st.pos) return [st.pos.lat, st.pos.lon];
+  const lp = store.get('lastpos', null); return lp ? [lp.lat, lp.lon] : [43.26, -2.93];
+}
+function syncSky() {
+  if (!cc) return;
+  cc.ponerCielo(nightMode === 'auto' ? 'auto' : nightMode === 'night' ? 'noche' : 'dia');
+  cc.ponerTiempo(wxMode === 'auto' ? 'real' : (WXSKY[wxMode] || 'despejado'));
+  const P = cc.paleta(); skyEl.style.background = P.fog; if (scene.fog) scene.fog.color.set(P.fog);
+}
+if (window.CieloClima) {
+  cc = CieloClima.crear({
+    contenedor: skyEl, horizonteY: horizonY, posicion: skyPos,
+    persistir: false,          // tus ajustes (d3d.night / d3d.wx) son la fuente de verdad
+    particulas: false,         // la lluvia y la nieve ya son partículas 3D de la escena
+    cielo: nightMode === 'auto' ? 'auto' : nightMode === 'night' ? 'noche' : 'dia',
+    tiempo: wxMode === 'auto' ? 'real' : (WXSKY[wxMode] || 'despejado'),
+    noche: { sky: '#070b18', hor: '#16213f', fog: '#070b18' },      // conserva el azul oscuro de la noche de D3D
+    alCambiar: (P, s) => {
+      skyEl.style.background = P.fog; if (scene.fog) scene.fog.color.set(P.fog);
+      if (wxMode === 'auto') { const w = s.w; setWeather(w.niebla > 0.5 ? 'fog' : w.nieve > 0.05 ? 'snow' : w.lluvia > 0.05 ? 'rain' : 'clear'); }
+    },
+  });
+  window.__cielo = cc;      // para probar en la consola: __cielo.ponerMet({ nubes: 0.6 }), __cielo.ponerCielo('atardecer')
+}
 
 // ------------------------------------------------------------------ resize
 function resize() {
   const w = window.innerWidth, h = window.innerHeight;
   renderer.setSize(w, h, false);
   camera.aspect = w / h; camera.fov = w / h < 1 ? 58 : 45; camera.updateProjectionMatrix();
+  if (cc) cc.aplicar();
 }
 window.addEventListener('resize', resize); resize();
 
@@ -798,6 +840,7 @@ function frame(now) {
   camera.position.set(Math.sin(c.yaw) * Math.cos(pr) * c.dist + carRoot.position.x, 0.7 + Math.sin(pr) * c.dist, Math.cos(c.yaw) * Math.cos(pr) * c.dist);
   camera.lookAt(carRoot.position.x, 0.7, 0);
 
+  if (cc) cc.sync();
   renderer.render(scene, camera);
 }
 requestAnimationFrame(frame);

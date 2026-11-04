@@ -2,6 +2,7 @@
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
 html, body { margin: 0; height: 100%; overflow: hidden; background: #000; color: #fff;
   font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; overscroll-behavior: none; touch-action: none; }
+#sky { position: fixed; inset: 0; z-index: 0; background: #070b18; }   /* cielo con nubes (cielo.js), detrás del canvas transparente */
 #gl { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
 
 #loading { position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
